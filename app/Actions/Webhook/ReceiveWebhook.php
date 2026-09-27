@@ -31,7 +31,12 @@ final class ReceiveWebhook
 
                 return response()->json(['status' => 'ok', 'update' => $status->status->value]);
             } catch (Throwable $e) {
-                Log::error('Status update error: '.$e->getMessage());
+                Log::error('Status update failed', [
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                    'provider_message_id' => $status->providerMessageId,
+                    'status' => $status->status->value,
+                ]);
 
                 return response()->json(['status' => 'error'], 500);
             }
@@ -40,8 +45,10 @@ final class ReceiveWebhook
         try {
             $incoming = $normalizer->normalize($payload);
         } catch (Throwable $e) {
-            Log::warning('Ignoring unsupported webhook payload: '.$e->getMessage(), [
+            Log::warning('Ignoring unsupported webhook payload', [
                 'event' => $payload['event'] ?? null,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
             ]);
 
             return response()->json(['status' => 'ignored']);
@@ -61,20 +68,31 @@ final class ReceiveWebhook
 
                 TouchConversation::run($message->conversation_id, $incoming->timestamp);
 
-                if ($incoming->type->isMedia()) {
-                    DownloadMedia::dispatch($message->id);
-                } else {
-                    IndexMessage::dispatch($message->id);
-                }
-
                 return $message;
             });
+
+            if ($message === null) {
+                return response()->json(['status' => 'ok', 'duplicate' => true]);
+            }
+
+            // Dispatch only after the transaction committed so a failed commit
+            // cannot leave jobs for a message that never persisted.
+            if ($message->type->isMedia()) {
+                DownloadMedia::dispatch($message->id);
+            } else {
+                IndexMessage::dispatch($message->id);
+            }
         } catch (Throwable $e) {
-            Log::error('Webhook error: '.$e->getMessage());
+            Log::error('Webhook error', [
+                'event' => $payload['event'] ?? null,
+                'remote_jid' => $payload['data']['key']['remoteJid'] ?? null,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
 
             return response()->json(['status' => 'error'], 500);
         }
 
-        return response()->json(['status' => 'ok', 'duplicate' => $message === null]);
+        return response()->json(['status' => 'ok', 'duplicate' => false]);
     }
 }

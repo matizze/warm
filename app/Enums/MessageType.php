@@ -20,4 +20,13 @@ enum MessageType: string
     {
         return in_array($this, [self::Image, self::Audio, self::Video, self::Document, self::Sticker], true);
     }
+
+    /**
+     * Types sent through the provider's media endpoint. Sticker is
+     * downloadable but not sendable, so it is deliberately excluded.
+     */
+    public function needsMediaEndpoint(): bool
+    {
+        return in_array($this, [self::Image, self::Audio, self::Video, self::Document], true);
+    }
 }

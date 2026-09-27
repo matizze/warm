@@ -3,6 +3,8 @@
 namespace App\Processing;
 
 use App\Contracts\MediaProcessor;
+use RuntimeException;
+use Throwable;
 
 /**
  * Runs every processor whose supports() matches and aggregates the results.
@@ -26,7 +28,15 @@ final class ProcessingService
                 continue;
             }
 
-            $result = $processor->process($buffer, $context);
+            try {
+                $result = $processor->process($buffer, $context);
+            } catch (Throwable $e) {
+                throw new RuntimeException(
+                    "Processor [{$processor->name()}] falhou: {$e->getMessage()}",
+                    previous: $e,
+                );
+            }
+
             if ($result !== null) {
                 $results[] = $result;
             }

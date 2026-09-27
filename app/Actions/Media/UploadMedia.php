@@ -24,7 +24,7 @@ final class UploadMedia
             throw new RuntimeException('Invalid base64 payload');
         }
 
-        $filename = (string) $input['filename'];
+        $filename = $this->sanitizeFilename((string) $input['filename']);
         $mimeType = (string) ($input['mimeType'] ?? 'application/octet-stream');
         $storageKey = 'media/uploads/'.Str::uuid()."/{$filename}";
 
@@ -47,15 +47,21 @@ final class UploadMedia
             IndexMessage::dispatch($media->message_id);
         }
 
-        return [
-            'mediaId' => $media->id,
-            'storageKey' => $media->storage_key,
-            'mimeType' => $media->mime_type,
-            'sizeBytes' => $media->size_bytes,
-            'filename' => $media->filename,
-            'extractedText' => $media->extracted_text,
-            'processing' => $media->metadata['processing'] ?? null,
-            'signedUrl' => app(MediaStorage::class)->getSignedUrl($media->storage_key),
-        ];
+        return $media->present();
+    }
+
+    /**
+     * Reduces the user-supplied filename to a single safe basename so the
+     * storage key cannot escape the media directory (path traversal).
+     */
+    private function sanitizeFilename(string $filename): string
+    {
+        $name = basename(str_replace('\\', '/', trim($filename)));
+
+        if ($name === '' || $name === '.' || $name === '..' || str_contains($name, "\0")) {
+            throw new RuntimeException('Invalid filename');
+        }
+
+        return $name;
     }
 }

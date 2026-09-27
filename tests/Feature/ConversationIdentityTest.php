@@ -13,6 +13,7 @@ use App\Models\Group;
 use App\Models\Message;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\TestCase;
 
 class FakeWhatsAppProvider implements WhatsAppProvider
@@ -24,6 +25,19 @@ class FakeWhatsAppProvider implements WhatsAppProvider
         $this->recipient = $message->recipient;
 
         return new SendResult('PENDING', 'prov-1');
+    }
+
+    public function getMedia(string $providerMessageId, string $remoteJid, bool $fromMe): ProviderMedia
+    {
+        return new ProviderMedia('');
+    }
+}
+
+class ThrowingWhatsAppProvider implements WhatsAppProvider
+{
+    public function sendMessage(OutgoingMessage $message): SendResult
+    {
+        throw new RuntimeException('provedor fora do ar');
     }
 
     public function getMedia(string $providerMessageId, string $remoteJid, bool $fromMe): ProviderMedia
@@ -138,5 +152,18 @@ class ConversationIdentityTest extends TestCase
         $result = SendMessage::run(['conversationId' => 'nope', 'content' => 'oi']);
 
         $this->assertSame('error', $result['status']);
+    }
+
+    public function test_send_returns_error_payload_when_the_provider_fails(): void
+    {
+        $contact = Contact::create(['phone_number' => '5511888888888', 'name' => 'Ana']);
+        $conversation = Conversation::create(['type' => 'contact', 'contact_id' => $contact->id]);
+
+        app()->instance(WhatsAppProvider::class, new ThrowingWhatsAppProvider);
+
+        $result = SendMessage::run(['conversationId' => $conversation->id, 'content' => 'oi']);
+
+        $this->assertSame('error', $result['status']);
+        $this->assertSame('provedor fora do ar', $result['error']);
     }
 }

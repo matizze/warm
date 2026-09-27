@@ -6,7 +6,6 @@ use App\Integrations\OpenAI\OpenAIAudioProcessor;
 use App\Integrations\OpenAI\OpenAIImageProcessor;
 use App\Processing\ProcessingContext;
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 use Tests\TestCase;
 
 class OpenAIMediaProcessorsTest extends TestCase
@@ -40,12 +39,11 @@ class OpenAIMediaProcessorsTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'http://localhost:1234/v1/audio/transcriptions');
     }
 
-    public function test_audio_processor_throws_without_key(): void
+    public function test_audio_processor_skips_without_key(): void
     {
-        $this->expectException(RuntimeException::class);
-
         $context = new ProcessingContext(type: 'audio', mimeType: 'audio/ogg', filename: 'note.ogg');
-        (new OpenAIAudioProcessor(['openai_key' => '']))->process('audio-bytes', $context);
+
+        $this->assertNull((new OpenAIAudioProcessor(['openai_key' => '']))->process('audio-bytes', $context));
     }
 
     public function test_image_processor_describes_image_and_extracts_ocr(): void

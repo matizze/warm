@@ -6,7 +6,6 @@ use App\Contracts\WhatsAppProvider;
 use App\Data\OutgoingMessage;
 use App\Data\ProviderMedia;
 use App\Data\SendResult;
-use App\Enums\MessageType;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -28,7 +27,7 @@ final class EvolutionProvider implements WhatsAppProvider
 
     public function sendMessage(OutgoingMessage $message): SendResult
     {
-        if (in_array($message->type, [MessageType::Image, MessageType::Audio, MessageType::Video, MessageType::Document], true)) {
+        if ($message->type->needsMediaEndpoint()) {
             $result = $this->request('POST', "/message/sendMedia/{$this->instance}", [
                 'number' => $message->recipient,
                 'mediatype' => $message->type->value,
@@ -84,8 +83,10 @@ final class EvolutionProvider implements WhatsAppProvider
         ]);
 
         if ($response->failed()) {
+            $body = mb_substr((string) $response->body(), 0, 500);
+
             throw new RuntimeException(
-                "Falha na comunicação com o provedor (HTTP {$response->status()})."
+                "Falha na comunicação com o provedor ({$method} {$path}): HTTP {$response->status()} — {$body}"
             );
         }
 

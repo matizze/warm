@@ -10,12 +10,16 @@ use App\Models\Media;
 use App\Support\MediaStorage;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsAction;
+use Throwable;
 
 final class SendMessage
 {
     use AsAction;
 
     /**
+     * Expected failures (unknown conversation/media, provider rejection) are
+     * returned as a `status: error` payload; only unexpected errors throw.
+     *
      * @param  array<string, mixed>  $input
      * @return array{status: string, providerMessageId: ?string, error?: string}
      */
@@ -51,14 +55,22 @@ final class SendMessage
             $fileName = $resolved['fileName'];
         }
 
-        $result = app(WhatsAppProvider::class)->sendMessage(new OutgoingMessage(
-            recipient: $recipient,
-            type: $type,
-            content: isset($input['content']) ? (string) $input['content'] : null,
-            mediaBase64: $mediaBase64,
-            fileName: $fileName,
-            mimetype: $mimetype,
-        ));
+        try {
+            $result = app(WhatsAppProvider::class)->sendMessage(new OutgoingMessage(
+                recipient: $recipient,
+                type: $type,
+                content: isset($input['content']) ? (string) $input['content'] : null,
+                mediaBase64: $mediaBase64,
+                fileName: $fileName,
+                mimetype: $mimetype,
+            ));
+        } catch (Throwable $e) {
+            return [
+                'status' => 'error',
+                'providerMessageId' => null,
+                'error' => $e->getMessage(),
+            ];
+        }
 
         return ['status' => $result->status, 'providerMessageId' => $result->providerMessageId];
     }
@@ -69,10 +81,8 @@ final class SendMessage
             return null;
         }
 
-        $conversation = Conversation::with(['contact', 'group'])->find($conversationId);
-
-        return $conversation?->contact?->phone_number
-            ?? $conversation?->group?->provider_group_id;
+        return Conversation::with(['contact', 'group'])
+            ->find($conversationId)?->resolveProviderRecipient();
     }
 
     /**
