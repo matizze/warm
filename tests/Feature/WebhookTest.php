@@ -50,6 +50,15 @@ class WebhookTest extends TestCase
         $this->postJson('/webhook', [])->assertStatus(401);
     }
 
+    public function test_empty_token_is_allowed_in_testing_environment(): void
+    {
+        config(['warm.webhook_token' => '']);
+
+        $this->postJson('/webhook', ['event' => 'connection.update', 'data' => []])
+            ->assertOk()
+            ->assertJson(['status' => 'ignored']);
+    }
+
     public function test_ignores_unsupported_event(): void
     {
         $this->withHeaders($this->headers())

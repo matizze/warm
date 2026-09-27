@@ -7,7 +7,6 @@ use App\Enums\SearchMode;
 use App\Models\Message;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsAction;
 use Throwable;
 
@@ -52,26 +51,26 @@ final class SearchMessages
 
         $lexical = $this->lexical($filters)->map->toArray()->all();
 
-        return $this->fuse($lexical, $semantic);
+        return array_slice(
+            $this->fuse($lexical, $semantic),
+            (int) ($filters['offset'] ?? 0),
+            (int) ($filters['limit'] ?? 50),
+        );
     }
 
     /**
      * @param  array<string, mixed>  $filters
+     * @return Builder<Message>
      */
     private function baseQuery(array $filters): Builder
     {
         return Message::query()
-            ->when($this->uuid($filters['conversationId'] ?? null), fn (Builder $q, $v) => $q->where('conversation_id', $v))
-            ->when($this->uuid($filters['contactId'] ?? null), fn (Builder $q, $v) => $q->where('sender_contact_id', $v))
+            ->when($filters['conversationId'] ?? null, fn (Builder $q, $v) => $q->where('conversation_id', $v))
+            ->when($filters['contactId'] ?? null, fn (Builder $q, $v) => $q->where('sender_contact_id', $v))
             ->when($filters['type'] ?? null, fn (Builder $q, $v) => $q->where('type', $v))
             ->when($filters['direction'] ?? null, fn (Builder $q, $v) => $q->where('direction', $v))
             ->when($filters['from'] ?? null, fn (Builder $q, $v) => $q->where('created_at', '>=', $v))
             ->when($filters['to'] ?? null, fn (Builder $q, $v) => $q->where('created_at', '<=', $v));
-    }
-
-    private function uuid(mixed $value): ?string
-    {
-        return is_string($value) && Str::isUuid($value) ? $value : null;
     }
 
     /**
@@ -80,8 +79,14 @@ final class SearchMessages
      */
     private function lexical(array $filters): Collection
     {
-        return $this->baseQuery($filters)
-            ->when($filters['search'] ?? null, fn (Builder $q, $v) => $q->search((string) $v))
+        $query = $this->baseQuery($filters);
+
+        $term = $filters['search'] ?? null;
+        if (is_string($term) && $term !== '') {
+            $query->search($term);
+        }
+
+        return $query
             ->orderByDesc('created_at')
             ->limit((int) ($filters['limit'] ?? 50))
             ->offset((int) ($filters['offset'] ?? 0))
@@ -107,6 +112,7 @@ final class SearchMessages
             )
             ->orderByRaw('embedding <=> ?::vector', [$vector])
             ->limit((int) ($filters['limit'] ?? 50))
+            ->offset((int) ($filters['offset'] ?? 0))
             ->get();
 
         return $rows->map(function (Message $message) {
@@ -129,7 +135,7 @@ final class SearchMessages
         $merged = [];
 
         foreach ($lexical as $index => $message) {
-            $merged[$message['id']] = $message + ['score' => 1 / (self::RRF_K + $index + 1)];
+            $merged[$message['id']] = array_replace($message, ['score' => 1 / (self::RRF_K + $index + 1)]);
         }
 
         foreach ($semantic as $index => $message) {
@@ -137,7 +143,7 @@ final class SearchMessages
             if (isset($merged[$message['id']])) {
                 $merged[$message['id']]['score'] += $contribution;
             } else {
-                $merged[$message['id']] = $message + ['score' => $contribution];
+                $merged[$message['id']] = array_replace($message, ['score' => $contribution]);
             }
         }
 

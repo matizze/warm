@@ -50,7 +50,12 @@ final class ProcessMedia
 
             return $media;
         } catch (Throwable $e) {
-            $metadata['processing'] = ['status' => 'failed', 'error' => $e->getMessage()];
+            logger()->warning('Falha ao processar mídia', [
+                'media_id' => $media->id,
+                'exception' => $e::class,
+            ]);
+
+            $metadata['processing'] = ['status' => 'failed', 'error' => 'Não foi possível processar a mídia.'];
             $media->forceFill(['metadata' => $metadata])->save();
 
             return $media;

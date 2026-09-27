@@ -51,9 +51,10 @@ php artisan mcp:serve        # MCP server (stdio) — spawnado pelo cliente de I
 | GET    | `/health`         | `{"status":"ok"}`                                     |
 | POST   | `/admin/reindex`  | Dispara reindex (auth: `x-admin-token`; 404 se `ADMIN_TOKEN` vazio) |
 
-Comportamento do `/webhook` (idêntico ao original):
+Comportamento do `/webhook`:
 
-- Token ausente/errado → `401`
+- Token ausente/errado → `401`. Sem `WEBHOOK_TOKEN` configurado, só passa em
+  `local`/`testing`; em qualquer outro ambiente todo request é rejeitado.
 - Evento não suportado → `200 {"status":"ignored"}`
 - Mensagem nova → `200 {"status":"ok","duplicate":false}`
 - `messages.update` → aplica status + timestamps, `200 {"status":"ok","update":"read"}`
@@ -85,17 +86,17 @@ Tools: `message.send`, `contact.search`, `contact.get`, `group.search`,
 | `infrastructure/processing/*`           | `app/Processing/*` (`pdftotext`, Whisper, vision)       |
 | `infrastructure/embeddings/*`           | `App\Embeddings\EmbeddingService`                       |
 | `infrastructure/mcp/server.ts`          | `app/Mcp/*` + `mcp:serve`                               |
-| `webhook/handler.ts`                    | `App\Actions\Webhook\ReceiveWebhook` (`AsController`)   |
-| `scripts/reindex.ts`                    | `App\Actions\Search\ReindexMessages` (`AsCommand`)      |
+| `webhook/handler.ts`                    | `App\Actions\Webhook\ReceiveWebhook`                    |
+| `scripts/reindex.ts`                    | `App\Actions\Search\ReindexMessages` (`warm:reindex`)   |
 | `node-cron` scheduler                   | `routes/console.php` + `php artisan schedule:work`      |
 | idempotência `ON CONFLICT DO NOTHING`   | `DB::table('messages')->insertOrIgnore(...)`            |
 
 ### Laravel Actions
 
-- `AsController` → `ReceiveWebhook`, `AdminReindex`, `HealthCheck`
-- `AsJob` → `DownloadMedia`, `IndexMessage`
-- `AsCommand` → `ReindexMessages` (`warm:reindex`)
-- Demais Actions expõem `handle()`/`run()`
+Todas as ações usam apenas `AsAction`, que já incorpora `AsController`,
+`AsJob`, `AsCommand` e `AsListener`. O comportamento é escolhido pelo contexto
+de uso: rotas (`ReceiveWebhook`, `HealthCheck`, `AdminReindex`), jobs
+(`DownloadMedia`, `IndexMessage`) e comando (`ReindexMessages` → `warm:reindex`).
 
 Os comandos das Actions são registrados em `AppServiceProvider::boot()` via
 `Actions::registerCommands()` (exigência do pacote).
@@ -103,8 +104,9 @@ Os comandos das Actions são registrados em `AppServiceProvider::boot()` via
 ## Banco
 
 `contacts`, `groups`, `conversations`, `messages`, `media` — sem `instance_id`
-(o banco é a instância). `messages` tem `search_text` (texto indexável) e
-`embedding vector(1536)` com índice HNSW (cosseno) + índice GIN FTS.
+(o banco é a instância). `messages` tem `search_text` (texto indexável, usado
+pela busca lexical via `ILIKE`) e `embedding vector(1536)` com índice HNSW
+(cosseno).
 
 ## Testes
 
@@ -115,14 +117,29 @@ php artisan test
 ```
 
 Os testes usam **Postgres** (não SQLite) porque as migrations dependem de
-`vector`. `tests/Feature/WebhookTest.php` cobre auth, evento ignorado,
-persistência, idempotência, job de indexação e status update.
+`vector`. Cobertura: autenticação do webhook, evento ignorado, persistência e
+idempotência, status update, identidade de conversa (grupo vs contato) e
+resolução do destinatário no envio, busca híbrida (RRF), download retomável e
+validação das tools MCP.
 
-## Notas e pendências
+## Notas
 
+- **Identidade de conversa:** mensagens de grupo viram uma `Conversation` do
+  tipo `group` (por `provider_group_id`); mensagens privadas viram `contact`. No
+  envio, `message.send` recebe o UUID interno e resolve o destinatário
+  (telefone ou JID do grupo) antes de falar com o provider.
+- **Contrato do provider:** `WhatsAppProvider` expõe só `sendMessage` e
+  `getMedia` — as operações que a aplicação realmente usa. Novas capacidades
+  entram quando houver consumidor.
+- **Mídia retomável:** o download usa chave determinística
+  (`media/{messageId}/original`) e `storage_key` único; repetir não duplica
+  linha, não rebaixa o arquivo nem repete chamadas ao provider/IA.
+- **Reindexação:** `warm:reindex` nunca altera o schema. Se a dimensão de
+  embedding configurada divergir da coluna, ele aborta com erro; redimensionar
+  é uma operação explícita. Sem `OPENAI_API_KEY`, faz reindex apenas lexical.
+- **Falhas explícitas:** erro de escrita no storage e erro do provider viram
+  exceção; mensagens de erro não expõem corpo de resposta externo.
 - `media.download` e `message.send` dependem de uma instância Evolution viva.
-- Com `OPENAI_API_KEY` vazio, semântica degrada para lexical automaticamente e
-  `warm:reindex` falha com mensagem clara.
 - Migrations padrão do Laravel (`users`, `cache`, `jobs`, `sessions`) são
   mantidas porque `queue`/`cache`/`session` usam o banco. As tabelas `users` e
   `password_reset_tokens` não são usadas.

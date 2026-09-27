@@ -12,14 +12,19 @@ class AuthenticateWebhook
     {
         $expected = (string) config('warm.webhook_token');
 
-        // Empty token disables authentication (dev only).
+        // A missing token is only tolerable in local/testing; anywhere else it
+        // means misconfiguration, so every request is rejected.
         if ($expected === '') {
-            return $next($request);
+            if (app()->environment(['local', 'testing'])) {
+                return $next($request);
+            }
+
+            return response()->json(['status' => 'unauthorized'], 401);
         }
 
         $provided = $request->header('x-webhook-token') ?? $request->query('token');
 
-        if ($provided !== $expected) {
+        if (! is_string($provided) || ! hash_equals($expected, $provided)) {
             return response()->json(['status' => 'unauthorized'], 401);
         }
 

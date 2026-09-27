@@ -12,6 +12,9 @@ use App\Actions\Media\UploadMedia;
 use App\Actions\Messages\SearchMessages;
 use App\Actions\Messages\SendMessage;
 use App\Enums\SearchMode;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 /**
  * Exposes WARM capabilities to AI agents. Tools map to high-level actions,
@@ -96,6 +99,9 @@ final class ToolRegistry
                         'mode' => ['type' => 'string', 'enum' => ['lexical', 'semantic', 'hybrid'], 'default' => 'hybrid'],
                         'minScore' => ['type' => 'number'],
                         'limit' => ['type' => 'integer'],
+                        'offset' => ['type' => 'integer'],
+                        'from' => ['type' => 'string', 'description' => 'Data/hora mínima (ISO 8601)'],
+                        'to' => ['type' => 'string', 'description' => 'Data/hora máxima (ISO 8601)'],
                     ],
                 ],
             ],
@@ -144,6 +150,8 @@ final class ToolRegistry
      */
     public function call(string $name, array $arguments): array
     {
+        $arguments = $this->validate($name, $arguments);
+
         return match ($name) {
             'message.send' => SendMessage::run($arguments),
             'contact.search' => SearchContacts::run($arguments),
@@ -157,7 +165,71 @@ final class ToolRegistry
             'conversation.search' => SearchConversations::run($arguments),
             'media.download' => DownloadMedia::run((string) $arguments['messageId']),
             'media.upload' => UploadMedia::run($arguments),
-            default => throw new \InvalidArgumentException("Unknown tool: {$name}"),
         };
+    }
+
+    /**
+     * Validates tool arguments at the boundary so actions can trust their
+     * inputs (e.g. UUIDs are well formed before touching the database).
+     *
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function validate(string $name, array $arguments): array
+    {
+        $rules = match ($name) {
+            'message.send' => [
+                'conversationId' => ['required', 'uuid'],
+                'type' => ['sometimes', 'in:text,image,audio,video,document'],
+                'content' => ['sometimes', 'string'],
+                'mediaId' => ['sometimes', 'uuid'],
+            ],
+            'message.search' => [
+                'conversationId' => ['sometimes', 'uuid'],
+                'contactId' => ['sometimes', 'uuid'],
+                'type' => ['sometimes', 'string'],
+                'direction' => ['sometimes', 'in:inbound,outbound'],
+                'search' => ['sometimes', 'string'],
+                'mode' => ['sometimes', 'in:lexical,semantic,hybrid'],
+                'minScore' => ['sometimes', 'numeric'],
+                'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+                'offset' => ['sometimes', 'integer', 'min:0'],
+                'from' => ['sometimes', 'date'],
+                'to' => ['sometimes', 'date'],
+            ],
+            'contact.search' => [
+                'name' => ['sometimes', 'string'],
+                'phoneNumber' => ['sometimes', 'string'],
+                'search' => ['sometimes', 'string'],
+                'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            ],
+            'contact.get' => ['contactId' => ['required', 'uuid']],
+            'group.search' => [
+                'name' => ['sometimes', 'string'],
+                'search' => ['sometimes', 'string'],
+                'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            ],
+            'group.get' => ['groupId' => ['required', 'uuid']],
+            'conversation.search' => [
+                'name' => ['sometimes', 'string'],
+                'search' => ['sometimes', 'string'],
+                'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            ],
+            'media.download' => ['messageId' => ['required', 'uuid']],
+            'media.upload' => [
+                'type' => ['required', 'string'],
+                'base64' => ['required', 'string'],
+                'filename' => ['required', 'string'],
+                'mimeType' => ['sometimes', 'string'],
+                'messageId' => ['sometimes', 'uuid'],
+            ],
+            default => throw new InvalidArgumentException("Unknown tool: {$name}"),
+        };
+
+        try {
+            return Validator::make($arguments, $rules)->validate();
+        } catch (ValidationException $e) {
+            throw new InvalidArgumentException($e->validator->errors()->first());
+        }
     }
 }

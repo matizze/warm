@@ -68,6 +68,7 @@ return [
             ? [
                 'driver' => 'local',
                 'root' => env('STORAGE_LOCAL_PATH', storage_path('app/warm-media')),
+                'serve' => true,
                 'throw' => false,
                 'report' => false,
             ]

@@ -4,7 +4,6 @@ namespace App\Actions\Conversations;
 
 use App\Models\Conversation;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsAction;
 
 final class SearchConversations
@@ -20,11 +19,11 @@ final class SearchConversations
         $term = $filters['name'] ?? $filters['search'] ?? null;
 
         return Conversation::query()
-            ->when($this->uuid($filters['contactId'] ?? null), fn (Builder $q, $v) => $q->where('contact_id', $v))
-            ->when($this->uuid($filters['groupId'] ?? null), fn (Builder $q, $v) => $q->where('group_id', $v))
+            ->when($filters['contactId'] ?? null, fn (Builder $q, $v) => $q->where('contact_id', $v))
+            ->when($filters['groupId'] ?? null, fn (Builder $q, $v) => $q->where('group_id', $v))
             ->when($term ?? null, function (Builder $q, $v) {
                 $q->where(function (Builder $inner) use ($v) {
-                    $inner->where('id', 'ilike', "%{$v}%")
+                    $inner->whereRaw('id::text ILIKE ?', ["%{$v}%"])
                         ->orWhereHas('contact', fn (Builder $c) => $c->where('name', 'ilike', "%{$v}%"))
                         ->orWhereHas('group', fn (Builder $g) => $g->where('name', 'ilike', "%{$v}%"));
                 });
@@ -35,10 +34,5 @@ final class SearchConversations
             ->get()
             ->map->toArray()
             ->all();
-    }
-
-    private function uuid(mixed $value): ?string
-    {
-        return is_string($value) && Str::isUuid($value) ? $value : null;
     }
 }

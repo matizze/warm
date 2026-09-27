@@ -2,6 +2,7 @@
 
 namespace App\Actions\Media;
 
+use App\Actions\Messages\IndexMessage;
 use App\Models\Media;
 use App\Support\MediaStorage;
 use Illuminate\Support\Str;
@@ -41,6 +42,10 @@ final class UploadMedia
         ]);
 
         $media = ProcessMedia::run($media, $buffer);
+
+        if ($media->message_id !== null) {
+            IndexMessage::dispatch($media->message_id);
+        }
 
         return [
             'mediaId' => $media->id,

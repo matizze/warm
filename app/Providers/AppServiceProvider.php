@@ -11,7 +11,6 @@ use App\Processing\AudioProcessor;
 use App\Processing\ImageProcessor;
 use App\Processing\PdfProcessor;
 use App\Processing\ProcessingService;
-use App\Support\MediaStorage;
 use Illuminate\Support\ServiceProvider;
 use Lorisleiva\Actions\Facades\Actions;
 use RuntimeException;
@@ -39,8 +38,6 @@ class AppServiceProvider extends ServiceProvider
             new AudioProcessor(config('warm.processing')),
             new ImageProcessor(config('warm.processing')),
         ]));
-
-        $this->app->singleton(MediaStorage::class, fn () => new MediaStorage);
     }
 
     public function boot(): void

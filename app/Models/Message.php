@@ -9,8 +9,10 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
+/**
+ * @mixin IdeHelperMessage
+ */
 class Message extends Model
 {
     use HasUuids;
@@ -59,11 +61,6 @@ class Message extends Model
     public function sender(): BelongsTo
     {
         return $this->belongsTo(Contact::class, 'sender_contact_id');
-    }
-
-    public function media(): HasOne
-    {
-        return $this->hasOne(Media::class)->latestOfMany();
     }
 
     /**

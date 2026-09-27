@@ -75,6 +75,8 @@ return [
         'enabled' => filter_var(env('EMBEDDING_ENABLED', true), FILTER_VALIDATE_BOOL),
         'model' => env('EMBEDDING_MODEL', 'text-embedding-3-small'),
         'dimensions' => (int) env('EMBEDDING_DIMENSIONS', 1536),
+        'openai_key' => env('OPENAI_API_KEY', ''),
+        'openai_base_url' => rtrim(env('OPENAI_BASE_URL', 'https://api.openai.com/v1'), '/'),
     ],
 
     /*

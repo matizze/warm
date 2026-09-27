@@ -1,8 +1,14 @@
 # WARM — Laravel 12 port (in `laravel/`)
 
-Status: working port, validated live. Lives in `/Users/henriquecosta/Code/matizze/warm/laravel`.
+Status: working port, validated live. The Laravel app is now at the REPO ROOT
+(`/Users/henriquecosta/Code/matizze/warm`); the old TypeScript app was deleted.
+Git history: commit 7842a44 = snapshot of TS + laravel/ port; commit df3b102 = promote
+laravel/ to root and remove TypeScript (all TS files gone; only Laravel remains).
 Goal (user): reimplement the TS project in Laravel 12 with `lorisleiva/laravel-actions`
 as the ONLY application library. `league/flysystem-aws-s3-v3` allowed only as the S3 disk driver.
+NOTE: root `package.json` + `vite.config.js` + `resources/*` are the Laravel skeleton frontend
+stubs (not the TS app); they are unused and can be removed (pending user decision).
+Dockerfile/docker-compose were deleted for now (infra to be recreated later).
 
 ## Environment decisions
 - Laravel Framework 12.69.2, PHP 8.4 (Herd), Composer 2.
@@ -49,6 +55,17 @@ as the ONLY application library. `league/flysystem-aws-s3-v3` allowed only as th
 - MCP: initialize/tools/list/tools/call; contact.search, conversation.search, message.search (hybrid→lexical, score), unknown tool error.
 - media.upload → RustFS object + presigned URL fetchable.
 - `php artisan test` 7 passed; `./vendor/bin/pint` clean; route:cache + config:cache OK.
+
+## Validated live (hosted Evolution)
+- Inbound instance = "Matizze Suporte" (number 5527928346619); sender for tests = "henriquecosta".
+- End-to-end OK: text inbound (persist + search_text + embedding), hybrid/semantic search
+  across text/image/PDF by paraphrase, image (vision description + OCR), PDF (pdftotext),
+  audio (Whisper transcription), outbound text via MCP, outbound media via MCP
+  (media.upload -> message.send with mediaId), status sent->delivered, duplicate=true, auth 401.
+- MCP is stdio (`php artisan mcp:serve`) — NO tunnel needed. Claude Code/opencode config added in
+  `.mcp.json` and `opencode.json` ("warm": php artisan mcp:serve). The cloudflared tunnel is ONLY
+  for the Evolution webhook to reach `/webhook`.
+- `warm:reindex --force` verified (scanned/text/embeddings counted).
 
 ## Pendências
 - `media.download` + `message.send` need a live Evolution instance (EVOLUTION_URL).

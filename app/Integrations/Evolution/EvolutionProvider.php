@@ -30,7 +30,7 @@ final class EvolutionProvider implements WhatsAppProvider
     {
         if (in_array($message->type, [MessageType::Image, MessageType::Audio, MessageType::Video, MessageType::Document], true)) {
             $result = $this->request('POST', "/message/sendMedia/{$this->instance}", [
-                'number' => $message->conversationId,
+                'number' => $message->recipient,
                 'mediatype' => $message->type->value,
                 'media' => $message->mediaBase64 ?? $message->mediaUrl,
                 'mimetype' => $message->mimetype,
@@ -42,57 +42,8 @@ final class EvolutionProvider implements WhatsAppProvider
         }
 
         $result = $this->request('POST', "/message/sendText/{$this->instance}", [
-            'number' => $message->conversationId,
+            'number' => $message->recipient,
             'text' => $message->content,
-        ]);
-
-        return $this->toResult($result);
-    }
-
-    public function editMessage(string $messageId, string $content): SendResult
-    {
-        $result = $this->request('POST', "/message/updateMessage/{$this->instance}", [
-            'id' => $messageId,
-            'text' => $content,
-        ]);
-
-        return $this->toResult($result);
-    }
-
-    public function sendSticker(string $stickerId, string $conversationId): SendResult
-    {
-        $result = $this->request('POST', "/message/sendSticker/{$this->instance}", [
-            'number' => $conversationId,
-            'sticker' => $stickerId,
-        ]);
-
-        return $this->toResult($result);
-    }
-
-    public function react(string $messageId, string $emoji): SendResult
-    {
-        $result = $this->request('POST', "/message/sendReaction/{$this->instance}", [
-            'key' => ['id' => $messageId],
-            'reaction' => $emoji,
-        ]);
-
-        return $this->toResult($result);
-    }
-
-    public function deleteMessage(string $messageId): SendResult
-    {
-        $result = $this->request('POST', "/chat/deleteMessageForEveryone/{$this->instance}", [
-            'id' => $messageId,
-        ]);
-
-        return $this->toResult($result);
-    }
-
-    public function reply(string $messageId, string $content): SendResult
-    {
-        $result = $this->request('POST', "/message/sendText/{$this->instance}", [
-            'number' => $messageId,
-            'text' => $content,
         ]);
 
         return $this->toResult($result);
@@ -112,7 +63,7 @@ final class EvolutionProvider implements WhatsAppProvider
 
         $base64 = $response['base64'] ?? null;
         if (! is_string($base64) || $base64 === '') {
-            throw new RuntimeException("Evolution returned no media for message {$providerMessageId}");
+            throw new RuntimeException('O provedor não retornou a mídia solicitada.');
         }
 
         return new ProviderMedia(
@@ -134,7 +85,7 @@ final class EvolutionProvider implements WhatsAppProvider
 
         if ($response->failed()) {
             throw new RuntimeException(
-                "Evolution request failed ({$response->status()}): {$response->body()}"
+                "Falha na comunicação com o provedor (HTTP {$response->status()})."
             );
         }
 

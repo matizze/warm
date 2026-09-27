@@ -4,6 +4,7 @@ namespace App\Integrations\Evolution;
 
 use App\Data\IncomingMessage;
 use App\Data\StatusUpdate;
+use App\Enums\ConversationType;
 use App\Enums\MessageDirection;
 use App\Enums\MessageStatus;
 use App\Enums\MessageType;
@@ -73,10 +74,14 @@ final class EvolutionNormalizer
 
         return new IncomingMessage(
             providerId: (string) $providerId,
-            conversationId: $remoteJid,
+            providerConversationId: $remoteJid,
+            conversationType: $isGroup ? ConversationType::Group : ConversationType::Contact,
             senderContactId: $isGroup
                 ? (string) ($data['participant'] ?? $key['participant'] ?? $remoteJid)
                 : $remoteJid,
+            senderName: is_string($data['pushName'] ?? null) && $data['pushName'] !== ''
+                ? $data['pushName']
+                : null,
             direction: ($key['fromMe'] ?? false) ? MessageDirection::Outbound : MessageDirection::Inbound,
             type: $type,
             content: $this->extractText($message),
@@ -84,7 +89,6 @@ final class EvolutionNormalizer
             mediaUrl: $media['url'],
             mediaType: $media['mimetype'],
             metadata: [
-                'pushName' => $data['pushName'] ?? null,
                 'isGroup' => $isGroup,
                 'remoteJid' => $remoteJid,
                 'messageType' => $data['messageType'] ?? null,

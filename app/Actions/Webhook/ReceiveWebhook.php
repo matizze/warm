@@ -10,15 +10,14 @@ use App\Actions\Messages\PersistIncomingMessage;
 use App\Integrations\Normalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lorisleiva\Actions\Concerns\AsAction;
-use Lorisleiva\Actions\Concerns\AsController;
 use Throwable;
 
 final class ReceiveWebhook
 {
     use AsAction;
-    use AsController;
 
     public function __invoke(Request $request): JsonResponse
     {
@@ -53,25 +52,29 @@ final class ReceiveWebhook
         }
 
         try {
-            $message = PersistIncomingMessage::run($incoming);
+            $message = DB::transaction(function () use ($incoming) {
+                $message = PersistIncomingMessage::run($incoming);
 
-            if ($message === null) {
-                return response()->json(['status' => 'ok', 'duplicate' => true]);
-            }
+                if ($message === null) {
+                    return null;
+                }
 
-            TouchConversation::run($message->conversation_id, $incoming->timestamp);
+                TouchConversation::run($message->conversation_id, $incoming->timestamp);
 
-            if ($incoming->type->isMedia()) {
-                DownloadMedia::dispatch($message->id);
-            } else {
-                IndexMessage::dispatch($message->id);
-            }
+                if ($incoming->type->isMedia()) {
+                    DownloadMedia::dispatch($message->id);
+                } else {
+                    IndexMessage::dispatch($message->id);
+                }
 
-            return response()->json(['status' => 'ok', 'duplicate' => false]);
+                return $message;
+            });
         } catch (Throwable $e) {
             Log::error('Webhook error: '.$e->getMessage());
 
             return response()->json(['status' => 'error'], 500);
         }
+
+        return response()->json(['status' => 'ok', 'duplicate' => $message === null]);
     }
 }

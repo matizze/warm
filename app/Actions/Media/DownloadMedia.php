@@ -11,16 +11,18 @@ use App\Models\Message;
 use App\Support\MediaStorage;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsAction;
-use Lorisleiva\Actions\Concerns\AsJob;
 use RuntimeException;
 
 final class DownloadMedia
 {
     use AsAction;
-    use AsJob;
+
+    public int $jobTimeout = 300;
 
     /**
      * Downloads the provider media for a message, stores it and processes it.
+     * The storage key is deterministic, so a retry reuses the stored file and
+     * the processing already done instead of creating a new media row.
      *
      * @return array<string, mixed>
      */
@@ -39,6 +41,15 @@ final class DownloadMedia
             throw new RuntimeException("Message {$messageId} has no provider message id");
         }
 
+        $storageKey = "media/{$messageId}/original";
+
+        // Deterministic key + unique index make the operation idempotent: a
+        // retry reuses the stored file and avoids a second provider/AI call.
+        $existing = Media::where('storage_key', $storageKey)->first();
+        if ($existing !== null) {
+            return $this->result($existing);
+        }
+
         $remoteJid = $message->metadata['remoteJid'] ?? $this->resolveRemoteJid($message->conversation_id);
         $fromMe = $message->direction === MessageDirection::Outbound;
 
@@ -51,20 +62,21 @@ final class DownloadMedia
 
         $filename = $provider->fileName ?: "{$message->provider_message_id}.bin";
         $mimeType = $provider->mimetype ?: 'application/octet-stream';
-        $storageKey = "media/{$messageId}/{$filename}";
 
         app(MediaStorage::class)->put($storageKey, $buffer, $mimeType);
 
-        $media = Media::create([
-            'message_id' => $messageId,
-            'type' => $message->type->value,
-            'filename' => $filename,
-            'mime_type' => $mimeType,
-            'size_bytes' => strlen($buffer),
-            'storage_key' => $storageKey,
-            'extracted_text' => null,
-            'metadata' => $provider->caption ? ['caption' => $provider->caption] : [],
-        ]);
+        $media = Media::updateOrCreate(
+            ['storage_key' => $storageKey],
+            [
+                'message_id' => $messageId,
+                'type' => $message->type->value,
+                'filename' => $filename,
+                'mime_type' => $mimeType,
+                'size_bytes' => strlen($buffer),
+                'extracted_text' => null,
+                'metadata' => $provider->caption ? ['caption' => $provider->caption] : [],
+            ],
+        );
 
         $media = ProcessMedia::run($media, $buffer);
 

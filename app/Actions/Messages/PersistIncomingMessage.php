@@ -4,7 +4,9 @@ namespace App\Actions\Messages;
 
 use App\Actions\Contacts\FindOrCreateContact;
 use App\Actions\Conversations\FindOrCreateConversation;
+use App\Actions\Conversations\FindOrCreateGroupConversation;
 use App\Data\IncomingMessage;
+use App\Enums\ConversationType;
 use App\Enums\MessageStatus;
 use App\Models\Message;
 use Illuminate\Support\Facades\DB;
@@ -21,14 +23,11 @@ final class PersistIncomingMessage
      */
     public function handle(IncomingMessage $incoming): ?Message
     {
-        $pushName = $incoming->metadata['pushName'] ?? null;
+        $contact = FindOrCreateContact::run($incoming->senderContactId, $incoming->senderName);
 
-        $contact = FindOrCreateContact::run(
-            $incoming->senderContactId,
-            is_string($pushName) && $pushName !== '' ? $pushName : null,
-        );
-
-        $conversation = FindOrCreateConversation::run($contact->id);
+        $conversation = $incoming->conversationType === ConversationType::Group
+            ? FindOrCreateGroupConversation::run($incoming->providerConversationId)
+            : FindOrCreateConversation::run($contact->id);
 
         $metadata = array_filter([
             ...$incoming->metadata,
