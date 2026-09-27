@@ -1,13 +1,16 @@
 <?php
 
-namespace App\Processing;
+namespace App\Integrations\OpenAI;
 
+use App\Contracts\MediaProcessor;
+use App\Processing\ProcessedContent;
+use App\Processing\ProcessingContext;
 use Illuminate\Support\Facades\Http;
 
 /**
  * Describes images and extracts visible text (OCR) via OpenAI vision.
  */
-final class ImageProcessor implements MediaProcessor
+final class OpenAIImageProcessor implements MediaProcessor
 {
     private const PROMPT = 'Analise a imagem. Responda SOMENTE em JSON com as chaves: '
         .'"description" (descrição objetiva da imagem em português) e '
