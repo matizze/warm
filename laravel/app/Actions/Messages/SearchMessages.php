@@ -1,0 +1,149 @@
+<?php
+
+namespace App\Actions\Messages;
+
+use App\Embeddings\EmbeddingService;
+use App\Enums\SearchMode;
+use App\Models\Message;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use Lorisleiva\Actions\Concerns\AsAction;
+use Throwable;
+
+final class SearchMessages
+{
+    use AsAction;
+
+    private const DEFAULT_MIN_SCORE = 0.25;
+
+    private const RRF_K = 60;
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return list<array<string, mixed>>
+     */
+    public function handle(array $filters, SearchMode $mode = SearchMode::Hybrid): array
+    {
+        $hasQuery = is_string($filters['search'] ?? null) && trim((string) $filters['search']) !== '';
+
+        if (! $hasQuery || $mode === SearchMode::Lexical) {
+            return $this->lexical($filters)->map->toArray()->all();
+        }
+
+        $semantic = [];
+        $embeddings = app(EmbeddingService::class);
+
+        if ($embeddings->enabled()) {
+            try {
+                $vector = $embeddings->embed((string) $filters['search']);
+                if ($vector !== null) {
+                    $filters['minScore'] ??= self::DEFAULT_MIN_SCORE;
+                    $semantic = $this->semantic($vector, $filters);
+                }
+            } catch (Throwable $e) {
+                logger()->warning("Semantic search failed, falling back to lexical: {$e->getMessage()}");
+            }
+        }
+
+        if ($mode === SearchMode::Semantic) {
+            return $semantic;
+        }
+
+        $lexical = $this->lexical($filters)->map->toArray()->all();
+
+        return $this->fuse($lexical, $semantic);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    private function baseQuery(array $filters): Builder
+    {
+        return Message::query()
+            ->when($this->uuid($filters['conversationId'] ?? null), fn (Builder $q, $v) => $q->where('conversation_id', $v))
+            ->when($this->uuid($filters['contactId'] ?? null), fn (Builder $q, $v) => $q->where('sender_contact_id', $v))
+            ->when($filters['type'] ?? null, fn (Builder $q, $v) => $q->where('type', $v))
+            ->when($filters['direction'] ?? null, fn (Builder $q, $v) => $q->where('direction', $v))
+            ->when($filters['from'] ?? null, fn (Builder $q, $v) => $q->where('created_at', '>=', $v))
+            ->when($filters['to'] ?? null, fn (Builder $q, $v) => $q->where('created_at', '<=', $v));
+    }
+
+    private function uuid(mixed $value): ?string
+    {
+        return is_string($value) && Str::isUuid($value) ? $value : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, Message>
+     */
+    private function lexical(array $filters): Collection
+    {
+        return $this->baseQuery($filters)
+            ->when($filters['search'] ?? null, fn (Builder $q, $v) => $q->search((string) $v))
+            ->orderByDesc('created_at')
+            ->limit((int) ($filters['limit'] ?? 50))
+            ->offset((int) ($filters['offset'] ?? 0))
+            ->get();
+    }
+
+    /**
+     * @param  list<float|int>  $embedding
+     * @param  array<string, mixed>  $filters
+     * @return list<array<string, mixed>>
+     */
+    private function semantic(array $embedding, array $filters): array
+    {
+        $vector = EmbeddingService::toVectorLiteral($embedding);
+
+        $rows = $this->baseQuery($filters)
+            ->whereNotNull('embedding')
+            ->select('messages.*')
+            ->selectRaw('1 - (embedding <=> ?::vector) as score', [$vector])
+            ->when(
+                $filters['minScore'] ?? null,
+                fn (Builder $q, $v) => $q->whereRaw('1 - (embedding <=> ?::vector) >= ?', [$vector, $v]),
+            )
+            ->orderByRaw('embedding <=> ?::vector', [$vector])
+            ->limit((int) ($filters['limit'] ?? 50))
+            ->get();
+
+        return $rows->map(function (Message $message) {
+            $data = $message->toArray();
+            $data['score'] = (float) $message->getAttribute('score');
+
+            return $data;
+        })->all();
+    }
+
+    /**
+     * Reciprocal Rank Fusion of lexical and semantic results.
+     *
+     * @param  list<array<string, mixed>>  $lexical
+     * @param  list<array<string, mixed>>  $semantic
+     * @return list<array<string, mixed>>
+     */
+    private function fuse(array $lexical, array $semantic): array
+    {
+        $merged = [];
+
+        foreach ($lexical as $index => $message) {
+            $merged[$message['id']] = $message + ['score' => 1 / (self::RRF_K + $index + 1)];
+        }
+
+        foreach ($semantic as $index => $message) {
+            $contribution = 1 / (self::RRF_K + $index + 1);
+            if (isset($merged[$message['id']])) {
+                $merged[$message['id']]['score'] += $contribution;
+            } else {
+                $merged[$message['id']] = $message + ['score' => $contribution];
+            }
+        }
+
+        $result = array_values($merged);
+        usort($result, fn ($a, $b) => ($b['score'] ?? 0) <=> ($a['score'] ?? 0));
+
+        return $result;
+    }
+}

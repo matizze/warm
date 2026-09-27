@@ -1,0 +1,91 @@
+x-warm-env: &warm-env
+  DATABASE_URL: postgresql://warm:warm_pass@db:5432/warm
+  WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-evolution}
+  EVOLUTION_URL: ${EVOLUTION_URL:-http://host.docker.internal:8080}
+  EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-change-me}
+  EVOLUTION_INSTANCE_ID: ${EVOLUTION_INSTANCE_ID:-instance1}
+  WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-change-me}
+  PROCESSING_ENABLED: ${PROCESSING_ENABLED:-true}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+  TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL:-whisper-1}
+  VISION_MODEL: ${VISION_MODEL:-gpt-4o-mini}
+  EMBEDDING_ENABLED: ${EMBEDDING_ENABLED:-true}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+  STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
+  STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/.warm-media}
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_BUCKET: ${S3_BUCKET:-warm-media}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+  S3_FORCE_PATH_STYLE: "true"
+  MEDIA_SIGNED_URL_TTL: ${MEDIA_SIGNED_URL_TTL:-3600}
+  REINDEX_ENABLED: ${REINDEX_ENABLED:-true}
+  REINDEX_CRON: ${REINDEX_CRON:-0 3 * * *}
+  REINDEX_TZ: ${REINDEX_TZ:-America/Sao_Paulo}
+  PORT: "3000"
+
+services:
+  warm:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *warm-env
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: ["pnpm", "scheduler"]
+    environment:
+      <<: *warm-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: warm
+      POSTGRES_USER: warm
+      POSTGRES_PASSWORD: warm_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warm -d warm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  miniodata:
