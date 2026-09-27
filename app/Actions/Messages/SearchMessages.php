@@ -67,13 +67,15 @@ final class SearchMessages
      */
     private function tryEmbed(EmbeddingService $embeddings, string $search): ?array
     {
-        try {
-            return $embeddings->embed($search);
-        } catch (Throwable $e) {
-            logger()->warning("Semantic search failed, falling back to lexical: {$e->getMessage()}");
+        return rescue(
+            fn (): ?array => $embeddings->embed($search),
+            function (Throwable $e): ?array {
+                logger()->warning("Semantic search failed, falling back to lexical: {$e->getMessage()}");
 
-            return null;
-        }
+                return null;
+            },
+            false,
+        );
     }
 
     /**

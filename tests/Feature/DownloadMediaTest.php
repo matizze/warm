@@ -7,6 +7,7 @@ use App\Contracts\WhatsAppProvider;
 use App\Data\OutgoingMessage;
 use App\Data\ProviderMedia;
 use App\Data\SendResult;
+use App\Exceptions\ProviderException;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Media;
@@ -14,7 +15,6 @@ use App\Models\Message;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 use Tests\TestCase;
 
 class CountingMediaProvider implements WhatsAppProvider
@@ -47,7 +47,7 @@ class FailingMediaProvider implements WhatsAppProvider
 
     public function getMedia(string $providerMessageId, string $remoteJid, bool $fromMe): ProviderMedia
     {
-        throw new RuntimeException('provedor indisponivel');
+        throw new ProviderException('provedor indisponivel');
     }
 }
 
@@ -105,7 +105,7 @@ class DownloadMediaTest extends TestCase
         ]);
     }
 
-    public function test_download_failure_records_state_on_the_message(): void
+    public function test_download_rethrows_provider_failure_for_job_retries(): void
     {
         Queue::fake();
         config(['warm.storage.disk' => 'local']);
@@ -113,12 +113,17 @@ class DownloadMediaTest extends TestCase
         $message = $this->inboundMediaMessage();
         app()->instance(WhatsAppProvider::class, new FailingMediaProvider);
 
-        try {
-            DownloadMedia::run($message->id);
-            $this->fail('Expected DownloadMedia to rethrow the provider failure');
-        } catch (RuntimeException $e) {
-            $this->assertSame('provedor indisponivel', $e->getMessage());
-        }
+        $this->expectException(ProviderException::class);
+        $this->expectExceptionMessage('provedor indisponivel');
+
+        DownloadMedia::run($message->id);
+    }
+
+    public function test_job_failure_records_state_on_the_message(): void
+    {
+        $message = $this->inboundMediaMessage();
+
+        DownloadMedia::make()->jobFailed(new ProviderException('provedor indisponivel'), $message->id);
 
         $message->refresh();
         $this->assertSame('failed', $message->metadata['download']['status']);
@@ -126,21 +131,12 @@ class DownloadMediaTest extends TestCase
         $this->assertSame(1, $message->metadata['download']['attempts']);
     }
 
-    public function test_download_retry_increments_failure_attempts(): void
+    public function test_job_failure_retries_increment_attempts(): void
     {
-        Queue::fake();
-        config(['warm.storage.disk' => 'local']);
-
         $message = $this->inboundMediaMessage();
-        app()->instance(WhatsAppProvider::class, new FailingMediaProvider);
 
         foreach ([1, 2] as $attempt) {
-            try {
-                DownloadMedia::run($message->id);
-                $this->fail('Expected DownloadMedia to rethrow the provider failure');
-            } catch (RuntimeException $e) {
-                // expected
-            }
+            DownloadMedia::make()->jobFailed(new ProviderException('provedor indisponivel'), $message->id);
 
             $this->assertSame($attempt, $message->refresh()->metadata['download']['attempts']);
         }

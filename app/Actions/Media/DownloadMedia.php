@@ -25,9 +25,8 @@ final class DownloadMedia
      * The storage key is deterministic, so a retry reuses the stored file and
      * the processing already done instead of creating a new media row.
      *
-     * Failures are recorded on the message metadata (`download.status`,
-     * `error`, `attempts`) so a silent provider failure leaves an actionable
-     * trace instead of just vanishing from search.
+     * Failures propagate so the queue can retry the job; the final failure
+     * state is recorded by the queue worker through jobFailed().
      *
      * @return array<string, mixed>
      */
@@ -46,16 +45,27 @@ final class DownloadMedia
             throw new RuntimeException("Message {$messageId} has no provider message id");
         }
 
-        try {
-            $media = $this->download($message);
-        } catch (Throwable $e) {
-            $this->markDownloadFailed($message, $e);
-            throw $e;
-        }
+        $media = $this->download($message);
 
         $this->markDownloadDone($message);
 
         return $media->present();
+    }
+
+    /**
+     * Invoked by the queue worker when the download job ultimately fails.
+     * Records `metadata.download = {status, error, attempts}` on the message
+     * so a silent provider failure leaves an actionable trace (selective retry
+     * and monitoring) instead of just vanishing from search.
+     */
+    public function jobFailed(Throwable $e, string $messageId): void
+    {
+        $message = Message::find($messageId);
+        if ($message === null) {
+            return;
+        }
+
+        $this->markDownloadFailed($message, $e);
     }
 
     private function download(Message $message): Media

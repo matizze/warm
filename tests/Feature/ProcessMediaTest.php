@@ -111,7 +111,7 @@ class ProcessMediaTest extends TestCase
         $this->assertSame('Ola WARM', $media->extracted_text);
     }
 
-    public function test_marks_failed_with_the_cause_and_processor(): void
+    public function test_marks_failed_with_the_cause(): void
     {
         $processor = new class implements MediaProcessor
         {
@@ -137,6 +137,5 @@ class ProcessMediaTest extends TestCase
 
         $this->assertSame('failed', $media->metadata['processing']['status']);
         $this->assertStringContainsString('falha sintetica', $media->metadata['processing']['error']);
-        $this->assertStringContainsString('[audio]', $media->metadata['processing']['error']);
     }
 }

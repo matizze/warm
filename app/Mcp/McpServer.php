@@ -2,6 +2,7 @@
 
 namespace App\Mcp;
 
+use App\Exceptions\ProviderException;
 use Throwable;
 
 /**
@@ -106,9 +107,23 @@ final class McpServer
 
             return [
                 'content' => [['type' => 'text', 'text' => json_encode($result, JSON_UNESCAPED_UNICODE)]],
-                'isError' => false,
+                'isError' => is_array($result) && ($result['status'] ?? null) === 'error',
             ];
         } catch (Throwable $e) {
+            // A provider failure on message.send is an expected domain error:
+            // map it back to the tool's status:error contract instead of a
+            // generic isError. Any other exception stays an unexpected error.
+            if ($e instanceof ProviderException && $name === 'message.send') {
+                return [
+                    'content' => [['type' => 'text', 'text' => json_encode([
+                        'status' => 'error',
+                        'providerMessageId' => null,
+                        'error' => $e->getMessage(),
+                    ], JSON_UNESCAPED_UNICODE)]],
+                    'isError' => true,
+                ];
+            }
+
             $this->log("Tool {$name} failed: {$e->getMessage()}");
 
             return [

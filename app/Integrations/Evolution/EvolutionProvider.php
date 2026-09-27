@@ -6,9 +6,9 @@ use App\Contracts\WhatsAppProvider;
 use App\Data\OutgoingMessage;
 use App\Data\ProviderMedia;
 use App\Data\SendResult;
+use App\Exceptions\ProviderException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 
 final class EvolutionProvider implements WhatsAppProvider
 {
@@ -62,7 +62,7 @@ final class EvolutionProvider implements WhatsAppProvider
 
         $base64 = $response['base64'] ?? null;
         if (! is_string($base64) || $base64 === '') {
-            throw new RuntimeException('O provedor não retornou a mídia solicitada.');
+            throw new ProviderException('O provedor não retornou a mídia solicitada.');
         }
 
         return new ProviderMedia(
@@ -85,7 +85,7 @@ final class EvolutionProvider implements WhatsAppProvider
         if ($response->failed()) {
             $body = mb_substr((string) $response->body(), 0, 500);
 
-            throw new RuntimeException(
+            throw new ProviderException(
                 "Falha na comunicação com o provedor ({$method} {$path}): HTTP {$response->status()} — {$body}"
             );
         }
