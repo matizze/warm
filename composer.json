@@ -13,13 +13,17 @@
         "lorisleiva/laravel-actions": "^2.12"
     },
     "require-dev": {
+        "barryvdh/laravel-ide-helper": "^3.7",
         "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.12",
+        "laravel/boost": "^2.10",
         "laravel/pail": "^1.2.2",
+        "laravel/pao": "^1.1",
         "laravel/pint": "^1.24",
         "laravel/sail": "^1.41",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.6",
-        "phpunit/phpunit": "^11.5.50"
+        "phpunit/phpunit": "^12.5.23"
     },
     "autoload": {
         "psr-4": {
@@ -46,6 +50,14 @@
         ],
         "mcp": "php artisan mcp:serve",
         "reindex": "php artisan warm:reindex",
+        "analyse": [
+            "@php artisan config:clear --ansi",
+            "vendor/bin/phpstan analyse --memory-limit=1G"
+        ],
+        "ide-helper": [
+            "php artisan ide-helper:generate",
+            "php artisan ide-helper:models -M --write-mixin --reset --dir=app/Models"
+        ],
         "test": [
             "@php artisan config:clear --ansi",
             "@php artisan test"
