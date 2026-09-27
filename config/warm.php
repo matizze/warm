@@ -53,14 +53,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | OpenAI (media processing + embeddings)
+    |--------------------------------------------------------------------------
+    |
+    | Single credentials/base URL for every OpenAI-backed adapter.
+    |
+    */
+
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY', ''),
+        'base_url' => rtrim(env('OPENAI_BASE_URL', 'https://api.openai.com/v1'), '/'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Media content processing (PDF / audio / image)
     |--------------------------------------------------------------------------
     */
 
     'processing' => [
         'enabled' => filter_var(env('PROCESSING_ENABLED', true), FILTER_VALIDATE_BOOL),
-        'openai_key' => env('OPENAI_API_KEY', ''),
-        'openai_base_url' => rtrim(env('OPENAI_BASE_URL', 'https://api.openai.com/v1'), '/'),
         'transcription_model' => env('TRANSCRIPTION_MODEL', 'whisper-1'),
         'vision_model' => env('VISION_MODEL', 'gpt-4o-mini'),
     ],
@@ -75,8 +87,6 @@ return [
         'enabled' => filter_var(env('EMBEDDING_ENABLED', true), FILTER_VALIDATE_BOOL),
         'model' => env('EMBEDDING_MODEL', 'text-embedding-3-small'),
         'dimensions' => (int) env('EMBEDDING_DIMENSIONS', 1536),
-        'openai_key' => env('OPENAI_API_KEY', ''),
-        'openai_base_url' => rtrim(env('OPENAI_BASE_URL', 'https://api.openai.com/v1'), '/'),
     ],
 
     /*

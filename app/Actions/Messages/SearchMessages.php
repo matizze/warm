@@ -2,9 +2,10 @@
 
 namespace App\Actions\Messages;
 
-use App\Embeddings\EmbeddingService;
+use App\Contracts\Embedder;
 use App\Enums\SearchMode;
 use App\Models\Message;
+use App\Support\VectorLiteral;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Lorisleiva\Actions\Concerns\AsAction;
@@ -31,7 +32,7 @@ final class SearchMessages
         }
 
         $semantic = [];
-        $embeddings = app(EmbeddingService::class);
+        $embeddings = app(Embedder::class);
 
         if ($embeddings->enabled()) {
             try {
@@ -100,7 +101,7 @@ final class SearchMessages
      */
     private function semantic(array $embedding, array $filters): array
     {
-        $vector = EmbeddingService::toVectorLiteral($embedding);
+        $vector = VectorLiteral::fromArray($embedding);
 
         $rows = $this->baseQuery($filters)
             ->whereNotNull('embedding')

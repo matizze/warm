@@ -7,7 +7,7 @@ use App\Actions\Media\DownloadMedia;
 use App\Actions\Messages\ApplyStatusUpdate;
 use App\Actions\Messages\IndexMessage;
 use App\Actions\Messages\PersistIncomingMessage;
-use App\Integrations\Normalizer;
+use App\Contracts\MessageNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +22,7 @@ final class ReceiveWebhook
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->all();
-        $normalizer = app(Normalizer::class);
+        $normalizer = app(MessageNormalizer::class);
 
         $status = $normalizer->normalizeStatus($payload);
         if ($status !== null) {

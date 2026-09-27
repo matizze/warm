@@ -2,7 +2,7 @@
 
 namespace App\Processing;
 
-use Illuminate\Support\Facades\Http;
+use App\Integrations\OpenAI\OpenAIClient;
 
 /**
  * Describes images and extracts visible text (OCR) via OpenAI vision.
@@ -13,7 +13,10 @@ final class ImageProcessor implements MediaProcessor
         .'"description" (descrição objetiva da imagem em português) e '
         .'"text" (todo o texto visível na imagem, ou string vazia se não houver).';
 
-    public function __construct(private readonly array $config) {}
+    public function __construct(
+        private readonly OpenAIClient $client,
+        private readonly string $model,
+    ) {}
 
     public function name(): string
     {
@@ -27,29 +30,19 @@ final class ImageProcessor implements MediaProcessor
 
     public function process(string $buffer, ProcessingContext $context): ?ProcessedContent
     {
-        $key = $this->config['openai_key'] ?? '';
-        if ($key === '') {
+        if (! $this->client->configured()) {
             return null;
         }
 
         $dataUrl = 'data:'.($context->mimeType ?: 'image/jpeg').';base64,'.base64_encode($buffer);
 
-        $response = Http::withToken($key)
-            ->timeout(120)
-            ->post($this->config['openai_base_url'].'/chat/completions', [
-                'model' => $this->config['vision_model'],
-                'response_format' => ['type' => 'json_object'],
-                'messages' => [[
-                    'role' => 'user',
-                    'content' => [
-                        ['type' => 'text', 'text' => self::PROMPT],
-                        ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]],
-                    ],
-                ]],
-            ])
-            ->throw();
-
-        $raw = (string) $response->json('choices.0.message.content', '{}');
+        $raw = $this->client->chat($this->model, [[
+            'role' => 'user',
+            'content' => [
+                ['type' => 'text', 'text' => self::PROMPT],
+                ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]],
+            ],
+        ]], jsonObject: true);
 
         $description = '';
         $ocr = '';
@@ -70,7 +63,7 @@ final class ImageProcessor implements MediaProcessor
             kind: 'description',
             text: $text,
             metadata: [
-                'model' => $this->config['vision_model'],
+                'model' => $this->model,
                 'processor' => $this->name(),
                 'ocr' => $ocr !== '' ? $ocr : null,
             ],

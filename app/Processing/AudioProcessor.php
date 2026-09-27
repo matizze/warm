@@ -2,7 +2,7 @@
 
 namespace App\Processing;
 
-use Illuminate\Support\Facades\Http;
+use App\Integrations\OpenAI\OpenAIClient;
 use RuntimeException;
 
 /**
@@ -10,7 +10,10 @@ use RuntimeException;
  */
 final class AudioProcessor implements MediaProcessor
 {
-    public function __construct(private readonly array $config) {}
+    public function __construct(
+        private readonly OpenAIClient $client,
+        private readonly string $model,
+    ) {}
 
     public function name(): string
     {
@@ -24,22 +27,15 @@ final class AudioProcessor implements MediaProcessor
 
     public function process(string $buffer, ProcessingContext $context): ?ProcessedContent
     {
-        $key = $this->config['openai_key'] ?? '';
-        if ($key === '') {
+        if (! $this->client->configured()) {
             throw new RuntimeException('OPENAI_API_KEY is not set; cannot transcribe');
         }
 
-        $response = Http::withToken($key)
-            ->timeout(120)
-            ->attach('file', $buffer, $context->filename)
-            ->post($this->config['openai_base_url'].'/audio/transcriptions', [
-                'model' => $this->config['transcription_model'],
-            ])
-            ->throw();
+        $text = $this->client->transcribe($this->model, $buffer, $context->filename);
 
         return new ProcessedContent(
             kind: 'transcription',
-            text: trim((string) $response->json('text')),
+            text: $text,
             metadata: ['processor' => $this->name()],
         );
     }

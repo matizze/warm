@@ -3,7 +3,7 @@
 namespace App\Actions\Search;
 
 use App\Actions\Messages\IndexMessage;
-use App\Embeddings\EmbeddingService;
+use App\Contracts\Embedder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsAction;
@@ -34,7 +34,7 @@ final class ReindexMessages
         // Lexical reindexing works without embeddings; only the vector column
         // is dimension-sensitive. Resizing it is an explicit schema change,
         // never a side effect of reindexing.
-        $embeddingsEnabled = app(EmbeddingService::class)->enabled();
+        $embeddingsEnabled = app(Embedder::class)->enabled();
         $start = microtime(true);
 
         if ($embeddingsEnabled) {

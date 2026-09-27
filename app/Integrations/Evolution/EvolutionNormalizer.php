@@ -2,6 +2,7 @@
 
 namespace App\Integrations\Evolution;
 
+use App\Contracts\MessageNormalizer;
 use App\Data\IncomingMessage;
 use App\Data\StatusUpdate;
 use App\Enums\ConversationType;
@@ -11,10 +12,10 @@ use App\Enums\MessageType;
 use DateTimeImmutable;
 
 /**
- * Converts Evolution webhook payloads into WARM's internal contracts.
- * This is the only place allowed to know Evolution's payload shape.
+ * Adapter that converts Evolution webhook payloads into WARM's internal
+ * contracts. This is the only place allowed to know Evolution's payload shape.
  */
-final class EvolutionNormalizer
+final class EvolutionNormalizer implements MessageNormalizer
 {
     /** Message body key => WARM message type. */
     private const TYPE_MAP = [

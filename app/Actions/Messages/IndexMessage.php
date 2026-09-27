@@ -2,9 +2,10 @@
 
 namespace App\Actions\Messages;
 
-use App\Embeddings\EmbeddingService;
+use App\Contracts\Embedder;
 use App\Models\Media;
 use App\Models\Message;
+use App\Support\VectorLiteral;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsAction;
@@ -48,7 +49,7 @@ final class IndexMessage
         }
 
         $embedding = null;
-        $embeddings = app(EmbeddingService::class);
+        $embeddings = app(Embedder::class);
 
         if ($embeddings->enabled()) {
             try {
@@ -64,7 +65,7 @@ final class IndexMessage
         if ($embedding !== null) {
             DB::update(
                 'UPDATE messages SET search_text = ?, embedding = ?::vector WHERE id = ?',
-                [$searchText, EmbeddingService::toVectorLiteral($embedding), $messageId],
+                [$searchText, VectorLiteral::fromArray($embedding), $messageId],
             );
         } else {
             DB::update('UPDATE messages SET search_text = ? WHERE id = ?', [$searchText, $messageId]);

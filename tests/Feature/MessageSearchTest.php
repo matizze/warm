@@ -26,7 +26,7 @@ class MessageSearchTest extends TestCase
 
         config([
             'warm.embeddings.enabled' => true,
-            'warm.embeddings.openai_key' => 'sk-test',
+            'warm.openai.api_key' => 'sk-test',
             'warm.embeddings.dimensions' => 1536,
         ]);
     }
