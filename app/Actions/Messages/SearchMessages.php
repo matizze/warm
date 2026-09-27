@@ -30,31 +30,51 @@ final class SearchMessages
             return $this->lexical($filters)->map->toArray()->all();
         }
 
-        $semantic = [];
         $embeddings = app(EmbeddingService::class);
-
-        if ($embeddings->enabled()) {
-            try {
-                $vector = $embeddings->embed((string) $filters['search']);
-                if ($vector !== null) {
-                    $filters['minScore'] ??= self::DEFAULT_MIN_SCORE;
-                    $semantic = $this->semantic($vector, $filters);
-                }
-            } catch (Throwable $e) {
-                logger()->warning("Semantic search failed, falling back to lexical: {$e->getMessage()}");
-            }
-        }
+        $vector = $embeddings->enabled() ? $this->tryEmbed($embeddings, (string) $filters['search']) : null;
 
         if ($mode === SearchMode::Semantic) {
-            return $semantic;
+            if ($vector === null) {
+                return [];
+            }
+
+            $filters['minScore'] ??= self::DEFAULT_MIN_SCORE;
+
+            return $this->semantic($vector, $filters);
         }
 
-        $lexical = $this->lexical($filters)->map->toArray()->all();
+        // Hybrid: each branch caps only by limit so the fusion ranks the same
+        // window; offset is applied once to the fused result, not in the
+        // branches too (which paged twice and silently skipped results, H2).
+        $window = $filters;
+        unset($window['offset']);
+        if ($vector !== null) {
+            $window['minScore'] ??= self::DEFAULT_MIN_SCORE;
+        }
+
+        $lexical = $this->lexical($window)->map->toArray()->all();
+        $semantic = $vector !== null ? $this->semantic($vector, $window) : [];
 
         return array_slice(
             $this->fuse($lexical, $semantic),
             (int) ($filters['offset'] ?? 0),
             (int) ($filters['limit'] ?? 50),
+        );
+    }
+
+    /**
+     * @return list<float>|null
+     */
+    private function tryEmbed(EmbeddingService $embeddings, string $search): ?array
+    {
+        return rescue(
+            fn (): ?array => $embeddings->embed($search),
+            function (Throwable $e): ?array {
+                logger()->warning("Semantic search failed, falling back to lexical: {$e->getMessage()}");
+
+                return null;
+            },
+            false,
         );
     }
 

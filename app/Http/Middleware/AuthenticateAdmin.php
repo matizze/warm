@@ -19,7 +19,7 @@ class AuthenticateAdmin
 
         $provided = $request->header('x-admin-token') ?? $request->query('token');
 
-        if ($provided !== $expected) {
+        if (! is_string($provided) || ! hash_equals($expected, $provided)) {
             return response()->json(['status' => 'unauthorized'], 401);
         }
 

@@ -93,6 +93,7 @@ final class ReindexMessages
                     logger()->warning('Falha na reindexação', [
                         'message_id' => $row->id,
                         'exception' => $e::class,
+                        'message' => $e->getMessage(),
                     ]);
                 }
             }

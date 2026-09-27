@@ -44,4 +44,15 @@ class Conversation extends Model
     {
         return $this->hasMany(Message::class);
     }
+
+    /**
+     * Resolves the provider address (phone number or group JID) used to
+     * reach this conversation. Single source of truth for sending and for
+     * downloading media from the provider.
+     */
+    public function resolveProviderRecipient(): ?string
+    {
+        return $this->contact?->phone_number
+            ?? $this->group?->provider_group_id;
+    }
 }

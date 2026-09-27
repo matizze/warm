@@ -6,7 +6,6 @@ use App\Contracts\MediaProcessor;
 use App\Processing\ProcessedContent;
 use App\Processing\ProcessingContext;
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 
 /**
  * Transcribes audio with OpenAI Whisper.
@@ -29,7 +28,7 @@ final class OpenAIAudioProcessor implements MediaProcessor
     {
         $key = $this->config['openai_key'] ?? '';
         if ($key === '') {
-            throw new RuntimeException('OPENAI_API_KEY is not set; cannot transcribe');
+            return null;
         }
 
         $response = Http::withToken($key)

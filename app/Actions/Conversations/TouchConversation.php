@@ -12,9 +12,14 @@ final class TouchConversation
 
     public function handle(string $conversationId, DateTimeInterface $at): void
     {
-        Conversation::whereKey($conversationId)->update([
-            'last_message_at' => $at,
-            'updated_at' => $at,
-        ]);
+        Conversation::whereKey($conversationId)
+            ->where(function ($query) use ($at) {
+                $query->whereNull('last_message_at')
+                    ->orWhere('last_message_at', '<', $at);
+            })
+            ->update([
+                'last_message_at' => $at,
+                'updated_at' => $at,
+            ]);
     }
 }

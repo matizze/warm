@@ -12,6 +12,7 @@ use App\Support\MediaStorage;
 use Illuminate\Support\Str;
 use Lorisleiva\Actions\Concerns\AsAction;
 use RuntimeException;
+use Throwable;
 
 final class DownloadMedia
 {
@@ -23,6 +24,9 @@ final class DownloadMedia
      * Downloads the provider media for a message, stores it and processes it.
      * The storage key is deterministic, so a retry reuses the stored file and
      * the processing already done instead of creating a new media row.
+     *
+     * Failures propagate so the queue can retry the job; the final failure
+     * state is recorded by the queue worker through jobFailed().
      *
      * @return array<string, mixed>
      */
@@ -41,13 +45,39 @@ final class DownloadMedia
             throw new RuntimeException("Message {$messageId} has no provider message id");
         }
 
+        $media = $this->download($message);
+
+        $this->markDownloadDone($message);
+
+        return $media->present();
+    }
+
+    /**
+     * Invoked by the queue worker when the download job ultimately fails.
+     * Records `metadata.download = {status, error, attempts}` on the message
+     * so a silent provider failure leaves an actionable trace (selective retry
+     * and monitoring) instead of just vanishing from search.
+     */
+    public function jobFailed(Throwable $e, string $messageId): void
+    {
+        $message = Message::find($messageId);
+        if ($message === null) {
+            return;
+        }
+
+        $this->markDownloadFailed($message, $e);
+    }
+
+    private function download(Message $message): Media
+    {
+        $messageId = $message->id;
         $storageKey = "media/{$messageId}/original";
 
         // Deterministic key + unique index make the operation idempotent: a
         // retry reuses the stored file and avoids a second provider/AI call.
         $existing = Media::where('storage_key', $storageKey)->first();
         if ($existing !== null) {
-            return $this->result($existing);
+            return $existing;
         }
 
         $remoteJid = $message->metadata['remoteJid'] ?? $this->resolveRemoteJid($message->conversation_id);
@@ -83,37 +113,39 @@ final class DownloadMedia
         // Index the message once its media text is available.
         IndexMessage::dispatch($messageId);
 
-        return $this->result($media);
+        return $media;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function result(Media $media): array
+    private function markDownloadFailed(Message $message, Throwable $e): void
     {
-        return [
-            'mediaId' => $media->id,
-            'storageKey' => $media->storage_key,
-            'mimeType' => $media->mime_type,
-            'sizeBytes' => $media->size_bytes,
-            'filename' => $media->filename,
-            'extractedText' => $media->extracted_text,
-            'processing' => $media->metadata['processing'] ?? null,
-            'signedUrl' => app(MediaStorage::class)->getSignedUrl($media->storage_key),
+        $metadata = $message->metadata ?? [];
+        $previous = $metadata['download'] ?? [];
+
+        $metadata['download'] = [
+            'status' => 'failed',
+            'error' => mb_substr($e->getMessage(), 0, 500),
+            'attempts' => (int) ($previous['attempts'] ?? 0) + 1,
         ];
+
+        $message->forceFill(['metadata' => $metadata])->save();
+    }
+
+    private function markDownloadDone(Message $message): void
+    {
+        $metadata = $message->metadata ?? [];
+        $metadata['download'] = ['status' => 'done'];
+        $message->forceFill(['metadata' => $metadata])->save();
     }
 
     private function resolveRemoteJid(string $conversationId): string
     {
-        $conversation = Conversation::find($conversationId);
+        $recipient = Conversation::with(['contact', 'group'])
+            ->find($conversationId)?->resolveProviderRecipient();
 
-        $jid = $conversation?->contact?->phone_number
-            ?? $conversation?->group?->provider_group_id;
-
-        if (! $jid) {
+        if (! $recipient) {
             throw new RuntimeException("Could not resolve remoteJid for conversation {$conversationId}");
         }
 
-        return $jid;
+        return $recipient;
     }
 }
