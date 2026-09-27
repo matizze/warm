@@ -2,6 +2,8 @@
 
 namespace App\Processing;
 
+use App\Contracts\MediaProcessor;
+
 /**
  * Runs every processor whose supports() matches and aggregates the results.
  */

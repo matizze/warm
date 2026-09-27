@@ -2,15 +2,19 @@
 
 namespace App\Embeddings;
 
-use Illuminate\Support\Facades\Http;
+use App\Contracts\EmbeddingProvider;
 
+/**
+ * Core embedding service. Delegates provider-specific API calls to the
+ * injected EmbeddingProvider port and exposes the vector literal helper.
+ */
 final class EmbeddingService
 {
-    public function __construct(private readonly array $config) {}
+    public function __construct(private readonly EmbeddingProvider $provider) {}
 
     public function enabled(): bool
     {
-        return ($this->config['enabled'] ?? false) && ($this->config['openai_key'] ?? '') !== '';
+        return $this->provider->enabled();
     }
 
     /**
@@ -18,23 +22,7 @@ final class EmbeddingService
      */
     public function embed(string $text): ?array
     {
-        $input = trim($text);
-        if (! $this->enabled() || $input === '') {
-            return null;
-        }
-
-        $response = Http::withToken($this->config['openai_key'])
-            ->timeout(60)
-            ->post($this->config['openai_base_url'].'/embeddings', [
-                'model' => $this->config['model'],
-                'input' => mb_substr($input, 0, 8000),
-                'dimensions' => $this->config['dimensions'],
-            ])
-            ->throw();
-
-        $embedding = $response->json('data.0.embedding');
-
-        return is_array($embedding) ? $embedding : null;
+        return $this->provider->embed($text);
     }
 
     /**

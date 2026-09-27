@@ -2,13 +2,15 @@
 
 namespace App\Providers;
 
+use App\Contracts\EmbeddingProvider;
+use App\Contracts\Normalizer;
 use App\Contracts\WhatsAppProvider;
 use App\Embeddings\EmbeddingService;
 use App\Integrations\Evolution\EvolutionNormalizer;
 use App\Integrations\Evolution\EvolutionProvider;
-use App\Integrations\Normalizer;
-use App\Processing\AudioProcessor;
-use App\Processing\ImageProcessor;
+use App\Integrations\OpenAI\OpenAIAudioProcessor;
+use App\Integrations\OpenAI\OpenAIEmbeddingProvider;
+use App\Integrations\OpenAI\OpenAIImageProcessor;
 use App\Processing\PdfProcessor;
 use App\Processing\ProcessingService;
 use Illuminate\Support\ServiceProvider;
@@ -26,17 +28,21 @@ class AppServiceProvider extends ServiceProvider
             };
         });
 
-        $this->app->singleton(Normalizer::class, fn () => new Normalizer(
-            (string) config('warm.provider'),
-            new EvolutionNormalizer,
-        ));
+        $this->app->singleton(Normalizer::class, function () {
+            return match ($provider = config('warm.provider')) {
+                'evolution' => new EvolutionNormalizer,
+                default => throw new RuntimeException("Unsupported WhatsApp provider: {$provider}"),
+            };
+        });
 
-        $this->app->singleton(EmbeddingService::class, fn () => new EmbeddingService(config('warm.embeddings')));
+        $this->app->singleton(EmbeddingProvider::class, fn () => new OpenAIEmbeddingProvider(config('warm.embeddings')));
+
+        $this->app->singleton(EmbeddingService::class, fn () => new EmbeddingService(app(EmbeddingProvider::class)));
 
         $this->app->singleton(ProcessingService::class, fn () => new ProcessingService([
             new PdfProcessor,
-            new AudioProcessor(config('warm.processing')),
-            new ImageProcessor(config('warm.processing')),
+            new OpenAIAudioProcessor(config('warm.processing')),
+            new OpenAIImageProcessor(config('warm.processing')),
         ]));
     }
 

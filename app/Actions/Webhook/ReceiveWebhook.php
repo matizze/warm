@@ -7,7 +7,7 @@ use App\Actions\Media\DownloadMedia;
 use App\Actions\Messages\ApplyStatusUpdate;
 use App\Actions\Messages\IndexMessage;
 use App\Actions\Messages\PersistIncomingMessage;
-use App\Integrations\Normalizer;
+use App\Contracts\Normalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;

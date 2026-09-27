@@ -1,14 +1,17 @@
 <?php
 
-namespace App\Processing;
+namespace App\Integrations\OpenAI;
 
+use App\Contracts\MediaProcessor;
+use App\Processing\ProcessedContent;
+use App\Processing\ProcessingContext;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 /**
  * Transcribes audio with OpenAI Whisper.
  */
-final class AudioProcessor implements MediaProcessor
+final class OpenAIAudioProcessor implements MediaProcessor
 {
     public function __construct(private readonly array $config) {}
 
