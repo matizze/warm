@@ -1,0 +1,203 @@
+# =============================================================================
+# WARM — WhatsApp Agent (Laravel 12)
+# Stack para Portainer / Docker Swarm.
+#
+# Padrao Matizze: Swarm + Traefik (letsencrypt) + GHCR, rede externa `mtzznet`.
+# - Imagem unica (app/worker/scheduler) trocando CONTAINER_MODE.
+# - Banco DEDICADO neste stack (pgvector) — database `warm`.
+# - MinIO EXISTENTE (stack `minio`): endpoint interno http://minio:9000,
+#   bucket `warm-media` criado pelo minio-init.
+#
+# Variaveis ${...} devem ser preenchidas como Environment variables do stack
+# no Portainer (ver deployment/.env.example).
+# =============================================================================
+
+version: "3.7"
+
+x-warm-env: &warm-env
+  APP_NAME: ${APP_NAME}
+  APP_ENV: ${APP_ENV}
+  APP_KEY: ${APP_KEY}
+  APP_DEBUG: ${APP_DEBUG}
+  APP_URL: ${APP_URL}
+  APP_LOCALE: ${APP_LOCALE}
+  APP_FALLBACK_LOCALE: ${APP_FALLBACK_LOCALE}
+  APP_FAKER_LOCALE: ${APP_FAKER_LOCALE}
+  APP_MAINTENANCE_DRIVER: ${APP_MAINTENANCE_DRIVER}
+  LOG_CHANNEL: ${LOG_CHANNEL}
+  LOG_STACK: ${LOG_STACK}
+  LOG_DEPRECATIONS_CHANNEL: ${LOG_DEPRECATIONS_CHANNEL}
+  LOG_LEVEL: ${LOG_LEVEL}
+  DB_CONNECTION: ${DB_CONNECTION}
+  DB_HOST: ${DB_HOST}
+  DB_PORT: ${DB_PORT}
+  DB_DATABASE: ${DB_DATABASE}
+  DB_USERNAME: ${DB_USERNAME}
+  DB_PASSWORD: ${DB_PASSWORD}
+  SESSION_DRIVER: ${SESSION_DRIVER}
+  SESSION_LIFETIME: ${SESSION_LIFETIME}
+  SESSION_ENCRYPT: ${SESSION_ENCRYPT}
+  SESSION_PATH: ${SESSION_PATH}
+  SESSION_DOMAIN: ${SESSION_DOMAIN}
+  QUEUE_CONNECTION: ${QUEUE_CONNECTION}
+  DB_QUEUE_RETRY_AFTER: ${DB_QUEUE_RETRY_AFTER}
+  CACHE_STORE: ${CACHE_STORE}
+  STORAGE_DRIVER: ${STORAGE_DRIVER}
+  STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH}
+  MEDIA_SIGNED_URL_TTL: ${MEDIA_SIGNED_URL_TTL}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+  AWS_BUCKET: ${AWS_BUCKET}
+  AWS_ENDPOINT: ${AWS_ENDPOINT}
+  AWS_USE_PATH_STYLE_ENDPOINT: ${AWS_USE_PATH_STYLE_ENDPOINT}
+  WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER}
+  EVOLUTION_URL: ${EVOLUTION_URL}
+  EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+  EVOLUTION_INSTANCE_ID: ${EVOLUTION_INSTANCE_ID}
+  WEBHOOK_TOKEN: ${WEBHOOK_TOKEN}
+  ADMIN_TOKEN: ${ADMIN_TOKEN}
+  PROCESSING_ENABLED: ${PROCESSING_ENABLED}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+  TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL}
+  VISION_MODEL: ${VISION_MODEL}
+  EMBEDDING_ENABLED: ${EMBEDDING_ENABLED}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS}
+  REINDEX_ENABLED: ${REINDEX_ENABLED}
+  REINDEX_CRON: ${REINDEX_CRON}
+  REINDEX_TZ: ${REINDEX_TZ}
+  RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
+  RUN_SEEDERS: ${RUN_SEEDERS:-false}
+
+services:
+  app:
+    image: ${APP_IMAGE}
+    environment:
+      <<: *warm-env
+      CONTAINER_MODE: app
+    networks:
+      - mtzznet
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8000/up || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      restart_policy:
+        condition: any
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.warm.rule=Host(`warm.matizze.com.br`)
+        - traefik.http.routers.warm.entrypoints=websecure
+        - traefik.http.routers.warm.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.warm.service=warm
+        - traefik.http.services.warm.loadbalancer.server.port=8000
+        - traefik.http.services.warm.loadbalancer.passHostHeader=true
+
+  worker:
+    image: ${APP_IMAGE}
+    environment:
+      <<: *warm-env
+      CONTAINER_MODE: worker
+    networks:
+      - mtzznet
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      restart_policy:
+        condition: any
+
+  scheduler:
+    image: ${APP_IMAGE}
+    environment:
+      <<: *warm-env
+      CONTAINER_MODE: scheduler
+    networks:
+      - mtzznet
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+      restart_policy:
+        condition: any
+
+  warm-db:
+    image: pgvector/pgvector:pg16
+    command: >
+      postgres
+      -c max_connections=200
+      -c timezone=America/Sao_Paulo
+    volumes:
+      - warm_pgdata:/var/lib/postgresql/data
+    networks:
+      - mtzznet
+    environment:
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ: America/Sao_Paulo
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      restart_policy:
+        condition: any
+
+  minio-init:
+    image: minio/mc:latest
+    networks:
+      - mtzznet
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set s3 http://minio:9000 '${AWS_ACCESS_KEY_ID}' '${AWS_SECRET_ACCESS_KEY}';
+      mc mb --ignore-existing s3/${AWS_BUCKET};
+      exit 0;
+      "
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: none
+      placement:
+        constraints:
+          - node.role == manager
+
+volumes:
+  warm_pgdata:
+
+networks:
+  mtzznet:
+    external: true
+    name: mtzznet
