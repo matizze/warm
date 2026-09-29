@@ -101,6 +101,7 @@ services:
         - traefik.enable=true
         - traefik.http.routers.warm.rule=Host(`warm.matizze.com.br`)
         - traefik.http.routers.warm.entrypoints=websecure
+        - traefik.http.routers.warm.priority=1
         - traefik.http.routers.warm.tls.certresolver=letsencryptresolver
         - traefik.http.routers.warm.service=warm
         - traefik.http.services.warm.loadbalancer.server.port=8000
