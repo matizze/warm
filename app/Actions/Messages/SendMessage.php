@@ -16,6 +16,10 @@ final class SendMessage
     use AsAction;
 
     /**
+     * Expected failures (unknown conversation/media) are returned as a
+     * `status: error` payload; a provider failure propagates as a typed
+     * `ProviderException` that the MCP layer maps back to `status: error`.
+     *
      * @param  array<string, mixed>  $input
      * @return array{status: string, providerMessageId: ?string, error?: string}
      */
@@ -69,10 +73,8 @@ final class SendMessage
             return null;
         }
 
-        $conversation = Conversation::with(['contact', 'group'])->find($conversationId);
-
-        return $conversation?->contact?->phone_number
-            ?? $conversation?->group?->provider_group_id;
+        return Conversation::with(['contact', 'group'])
+            ->find($conversationId)?->resolveProviderRecipient();
     }
 
     /**

@@ -2,11 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Actions\Media\DownloadMedia;
 use App\Actions\Messages\IndexMessage;
+use App\Contracts\Normalizer;
+use App\Data\IncomingMessage;
+use App\Data\StatusUpdate;
 use App\Models\Message;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Lorisleiva\Actions\Decorators\JobDecorator;
+use RuntimeException;
 use Tests\TestCase;
 
 class WebhookTest extends TestCase
@@ -92,6 +97,48 @@ class WebhookTest extends TestCase
         $this->assertNotNull($message->conversation->last_message_at);
 
         Queue::assertPushed(JobDecorator::class, fn (JobDecorator $job) => $job->decorates(IndexMessage::class));
+    }
+
+    public function test_media_message_dispatches_download_media(): void
+    {
+        Queue::fake();
+
+        $payload = $this->inbound('IMG-1');
+        $payload['data']['message'] = [
+            'imageMessage' => ['url' => 'https://cdn/x.jpg', 'mimetype' => 'image/jpeg', 'caption' => 'foto'],
+        ];
+
+        $this->withHeaders($this->headers())
+            ->postJson('/webhook', $payload)
+            ->assertOk()
+            ->assertJson(['status' => 'ok', 'duplicate' => false]);
+
+        $message = Message::where('provider_message_id', 'IMG-1')->firstOrFail();
+
+        Queue::assertPushed(JobDecorator::class, fn (JobDecorator $job) => $job->decorates(DownloadMedia::class));
+        Queue::assertNotPushed(JobDecorator::class, fn (JobDecorator $job) => $job->decorates(IndexMessage::class));
+        $this->assertNotNull($message);
+    }
+
+    public function test_webhook_exception_is_rendered_as_error_json(): void
+    {
+        app()->instance(Normalizer::class, new class implements Normalizer
+        {
+            public function normalize(array $payload): ?IncomingMessage
+            {
+                throw new RuntimeException('normalizer explodiu');
+            }
+
+            public function normalizeStatus(array $payload): ?StatusUpdate
+            {
+                return null;
+            }
+        });
+
+        $this->withHeaders($this->headers())
+            ->postJson('/webhook', $this->inbound('MSG-X'))
+            ->assertStatus(500)
+            ->assertJson(['status' => 'error']);
     }
 
     public function test_applies_status_update(): void

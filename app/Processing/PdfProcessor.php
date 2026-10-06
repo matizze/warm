@@ -2,6 +2,7 @@
 
 namespace App\Processing;
 
+use App\Contracts\MediaProcessor;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 

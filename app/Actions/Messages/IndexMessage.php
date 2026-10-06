@@ -57,6 +57,7 @@ final class IndexMessage
                 logger()->warning('Falha ao gerar embedding', [
                     'message_id' => $messageId,
                     'exception' => $e::class,
+                    'message' => $e->getMessage(),
                 ]);
             }
         }

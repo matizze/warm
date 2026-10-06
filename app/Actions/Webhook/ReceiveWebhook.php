@@ -7,13 +7,12 @@ use App\Actions\Media\DownloadMedia;
 use App\Actions\Messages\ApplyStatusUpdate;
 use App\Actions\Messages\IndexMessage;
 use App\Actions\Messages\PersistIncomingMessage;
-use App\Integrations\Normalizer;
+use App\Contracts\Normalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lorisleiva\Actions\Concerns\AsAction;
-use Throwable;
 
 final class ReceiveWebhook
 {
@@ -22,59 +21,57 @@ final class ReceiveWebhook
     public function __invoke(Request $request): JsonResponse
     {
         $payload = $request->all();
+
+        // Context shared by every log line produced while handling this
+        // payload, including exceptions reported by the central handler.
+        Log::withContext([
+            'event' => $payload['event'] ?? null,
+            'remote_jid' => $payload['data']['key']['remoteJid'] ?? null,
+        ]);
+
         $normalizer = app(Normalizer::class);
 
         $status = $normalizer->normalizeStatus($payload);
         if ($status !== null) {
-            try {
-                ApplyStatusUpdate::run($status->providerMessageId, $status->status);
-
-                return response()->json(['status' => 'ok', 'update' => $status->status->value]);
-            } catch (Throwable $e) {
-                Log::error('Status update error: '.$e->getMessage());
-
-                return response()->json(['status' => 'error'], 500);
-            }
-        }
-
-        try {
-            $incoming = $normalizer->normalize($payload);
-        } catch (Throwable $e) {
-            Log::warning('Ignoring unsupported webhook payload: '.$e->getMessage(), [
-                'event' => $payload['event'] ?? null,
+            Log::withContext([
+                'provider_message_id' => $status->providerMessageId,
+                'status' => $status->status->value,
             ]);
 
-            return response()->json(['status' => 'ignored']);
+            ApplyStatusUpdate::run($status->providerMessageId, $status->status);
+
+            return response()->json(['status' => 'ok', 'update' => $status->status->value]);
         }
 
+        $incoming = $normalizer->normalize($payload);
         if ($incoming === null) {
             return response()->json(['status' => 'ignored']);
         }
 
-        try {
-            $message = DB::transaction(function () use ($incoming) {
-                $message = PersistIncomingMessage::run($incoming);
+        $message = DB::transaction(function () use ($incoming) {
+            $message = PersistIncomingMessage::run($incoming);
 
-                if ($message === null) {
-                    return null;
-                }
+            if ($message === null) {
+                return null;
+            }
 
-                TouchConversation::run($message->conversation_id, $incoming->timestamp);
+            TouchConversation::run($message->conversation_id, $incoming->timestamp);
 
-                if ($incoming->type->isMedia()) {
-                    DownloadMedia::dispatch($message->id);
-                } else {
-                    IndexMessage::dispatch($message->id);
-                }
+            return $message;
+        });
 
-                return $message;
-            });
-        } catch (Throwable $e) {
-            Log::error('Webhook error: '.$e->getMessage());
-
-            return response()->json(['status' => 'error'], 500);
+        if ($message === null) {
+            return response()->json(['status' => 'ok', 'duplicate' => true]);
         }
 
-        return response()->json(['status' => 'ok', 'duplicate' => $message === null]);
+        // Dispatch only after the transaction committed so a failed commit
+        // cannot leave jobs for a message that never persisted.
+        if ($message->type->isMedia()) {
+            DownloadMedia::dispatch($message->id);
+        } else {
+            IndexMessage::dispatch($message->id);
+        }
+
+        return response()->json(['status' => 'ok', 'duplicate' => false]);
     }
 }

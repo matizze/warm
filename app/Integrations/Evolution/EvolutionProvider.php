@@ -6,10 +6,9 @@ use App\Contracts\WhatsAppProvider;
 use App\Data\OutgoingMessage;
 use App\Data\ProviderMedia;
 use App\Data\SendResult;
-use App\Enums\MessageType;
+use App\Exceptions\ProviderException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 
 final class EvolutionProvider implements WhatsAppProvider
 {
@@ -28,7 +27,7 @@ final class EvolutionProvider implements WhatsAppProvider
 
     public function sendMessage(OutgoingMessage $message): SendResult
     {
-        if (in_array($message->type, [MessageType::Image, MessageType::Audio, MessageType::Video, MessageType::Document], true)) {
+        if ($message->type->needsMediaEndpoint()) {
             $result = $this->request('POST', "/message/sendMedia/{$this->instance}", [
                 'number' => $message->recipient,
                 'mediatype' => $message->type->value,
@@ -63,7 +62,7 @@ final class EvolutionProvider implements WhatsAppProvider
 
         $base64 = $response['base64'] ?? null;
         if (! is_string($base64) || $base64 === '') {
-            throw new RuntimeException('O provedor não retornou a mídia solicitada.');
+            throw new ProviderException('O provedor não retornou a mídia solicitada.');
         }
 
         return new ProviderMedia(
@@ -84,8 +83,10 @@ final class EvolutionProvider implements WhatsAppProvider
         ]);
 
         if ($response->failed()) {
-            throw new RuntimeException(
-                "Falha na comunicação com o provedor (HTTP {$response->status()})."
+            $body = mb_substr((string) $response->body(), 0, 500);
+
+            throw new ProviderException(
+                "Falha na comunicação com o provedor ({$method} {$path}): HTTP {$response->status()} — {$body}"
             );
         }
 
