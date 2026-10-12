@@ -57,6 +57,7 @@ x-warm-env: &warm-env
   EVOLUTION_INSTANCE_ID: ${EVOLUTION_INSTANCE_ID}
   WEBHOOK_TOKEN: ${WEBHOOK_TOKEN}
   ADMIN_TOKEN: ${ADMIN_TOKEN}
+  MCP_TOKEN: ${MCP_TOKEN}
   PROCESSING_ENABLED: ${PROCESSING_ENABLED}
   OPENAI_API_KEY: ${OPENAI_API_KEY}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL}
@@ -106,6 +107,15 @@ services:
         - traefik.http.routers.warm.service=warm
         - traefik.http.services.warm.loadbalancer.server.port=8000
         - traefik.http.services.warm.loadbalancer.passHostHeader=true
+        ## MCP HTTP no mesmo host, em /mcp (Bearer no app + basicAuth na borda).
+        - traefik.http.routers.warm-mcp.rule=Host(`warm.matizze.com.br`) && PathPrefix(`/mcp`)
+        - traefik.http.routers.warm-mcp.entrypoints=websecure
+        - traefik.http.routers.warm-mcp.priority=10
+        - traefik.http.routers.warm-mcp.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.warm-mcp.service=warm
+        - traefik.http.routers.warm-mcp.middlewares=mcp-edge-auth
+        - traefik.http.middlewares.mcp-edge-auth.basicauth.realm=matizze-mcp
+        - traefik.http.middlewares.mcp-edge-auth.basicauth.users=matizze:$$apr1$$xglJrwPp$$LX9HWZwpLCIrAoM00UtTD0
 
   worker:
     image: ${APP_IMAGE}
