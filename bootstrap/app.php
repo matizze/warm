@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AuthenticateAdmin;
+use App\Http\Middleware\AuthenticateMcp;
 use App\Http\Middleware\AuthenticateWebhook;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'webhook.auth' => AuthenticateWebhook::class,
             'admin.auth' => AuthenticateAdmin::class,
+            'mcp.auth' => AuthenticateMcp::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -35,6 +35,7 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="WHATSAPP_PROVIDER" value="evolution"/>
         <env name="WEBHOOK_TOKEN" value="test-token"/>
+        <env name="MCP_TOKEN" value="test-mcp-token"/>
         <env name="PROCESSING_ENABLED" value="false"/>
         <env name="EMBEDDING_ENABLED" value="false"/>
         <env name="FILESYSTEM_DISK" value="local"/>
