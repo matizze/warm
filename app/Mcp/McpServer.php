@@ -6,8 +6,11 @@ use App\Exceptions\ProviderException;
 use Throwable;
 
 /**
- * Minimal Model Context Protocol server over stdio (JSON-RPC 2.0).
- * All logging goes to STDERR so it never corrupts the protocol on STDOUT.
+ * Minimal Model Context Protocol server (JSON-RPC 2.0).
+ *
+ * The JSON-RPC handling is transport-agnostic: `run()` drives it over stdio
+ * (all logging goes to STDERR so it never corrupts the protocol on STDOUT),
+ * while `handleRequest()` is reused by the HTTP transport in McpController.
  */
 final class McpServer
 {
@@ -35,7 +38,7 @@ final class McpServer
                 continue;
             }
 
-            $response = $this->handle($request);
+            $response = $this->handleRequest($request);
             if ($response !== null) {
                 $this->write($response);
             }
@@ -43,10 +46,13 @@ final class McpServer
     }
 
     /**
+     * Handles a single JSON-RPC message, returning the response payload or
+     * null for notifications (which expect no response).
+     *
      * @param  array<string, mixed>  $request
      * @return array<string, mixed>|null
      */
-    private function handle(array $request): ?array
+    public function handleRequest(array $request): ?array
     {
         $id = $request['id'] ?? null;
         $method = (string) ($request['method'] ?? '');

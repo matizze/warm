@@ -22,6 +22,8 @@ return [
 
     'webhook_token' => env('WEBHOOK_TOKEN', ''),
     'admin_token' => env('ADMIN_TOKEN', ''),
+    // Empty disables the HTTP MCP endpoint (POST /mcp returns 404).
+    'mcp_token' => env('MCP_TOKEN', ''),
 
     /*
     |--------------------------------------------------------------------------
