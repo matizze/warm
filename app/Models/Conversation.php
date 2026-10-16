@@ -16,6 +16,7 @@ class Conversation extends Model
     use HasUuids;
 
     protected $fillable = [
+        'instance_id',
         'type',
         'contact_id',
         'group_id',
@@ -28,6 +29,22 @@ class Conversation extends Model
             'type' => ConversationType::class,
             'last_message_at' => 'datetime',
         ];
+    }
+
+    /**
+     * A conversation always belongs to an instance; when none is given the
+     * default instance is assumed (legacy single-instance callers).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Conversation $conversation) {
+            $conversation->instance_id ??= Instance::defaultInstanceId();
+        });
+    }
+
+    public function instance(): BelongsTo
+    {
+        return $this->belongsTo(Instance::class, 'instance_id', 'instance_id');
     }
 
     public function contact(): BelongsTo

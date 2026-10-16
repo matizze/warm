@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Mcp\McpServer;
 use App\Mcp\ToolRegistry;
+use App\Models\Instance;
 use Illuminate\Console\Command;
 
 class McpServe extends Command
@@ -14,7 +15,7 @@ class McpServe extends Command
 
     public function handle(): int
     {
-        (new McpServer(app(ToolRegistry::class)))->run();
+        (new McpServer(new ToolRegistry(Instance::default())))->run();
 
         return self::SUCCESS;
     }

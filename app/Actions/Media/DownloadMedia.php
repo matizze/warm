@@ -3,9 +3,10 @@
 namespace App\Actions\Media;
 
 use App\Actions\Messages\IndexMessage;
-use App\Contracts\WhatsAppProvider;
 use App\Enums\MessageDirection;
+use App\Integrations\WhatsAppProviderResolver;
 use App\Models\Conversation;
+use App\Models\Instance;
 use App\Models\Media;
 use App\Models\Message;
 use App\Support\MediaStorage;
@@ -83,7 +84,10 @@ final class DownloadMedia
         $remoteJid = $message->metadata['remoteJid'] ?? $this->resolveRemoteJid($message->conversation_id);
         $fromMe = $message->direction === MessageDirection::Outbound;
 
-        $provider = app(WhatsAppProvider::class)->getMedia($message->provider_message_id, $remoteJid, $fromMe);
+        // Download from the same instance the message was received on.
+        $instance = $message->instance_id !== null ? Instance::find($message->instance_id) : null;
+        $provider = app(WhatsAppProviderResolver::class)->forInstance($instance)
+            ->getMedia($message->provider_message_id, $remoteJid, $fromMe);
 
         $buffer = base64_decode($provider->base64, true);
         if ($buffer === false) {

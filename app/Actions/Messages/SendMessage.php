@@ -2,10 +2,11 @@
 
 namespace App\Actions\Messages;
 
-use App\Contracts\WhatsAppProvider;
 use App\Data\OutgoingMessage;
 use App\Enums\MessageType;
+use App\Integrations\WhatsAppProviderResolver;
 use App\Models\Conversation;
+use App\Models\Instance;
 use App\Models\Media;
 use App\Support\MediaStorage;
 use Illuminate\Support\Str;
@@ -23,11 +24,31 @@ final class SendMessage
      * @param  array<string, mixed>  $input
      * @return array{status: string, providerMessageId: ?string, error?: string}
      */
-    public function handle(array $input): array
+    public function handle(array $input, ?Instance $contextInstance = null): array
     {
         $type = MessageType::tryFrom((string) ($input['type'] ?? 'text')) ?? MessageType::Text;
 
-        $recipient = $this->resolveRecipient((string) $input['conversationId']);
+        $conversation = $this->resolveConversation((string) $input['conversationId']);
+        if ($conversation === null) {
+            return [
+                'status' => 'error',
+                'providerMessageId' => null,
+                'error' => "conversation not found: {$input['conversationId']}",
+            ];
+        }
+
+        // The MCP context scopes tool calls to one instance: a client of one
+        // number must not be able to send through another number's conversation.
+        if ($contextInstance !== null && $conversation->instance_id !== $contextInstance->instance_id) {
+            return [
+                'status' => 'error',
+                'providerMessageId' => null,
+                'error' => "conversation {$conversation->id} belongs to another instance",
+            ];
+        }
+
+        $recipient = $conversation->resolveProviderRecipient();
+
         if ($recipient === null) {
             return [
                 'status' => 'error',
@@ -55,7 +76,10 @@ final class SendMessage
             $fileName = $resolved['fileName'];
         }
 
-        $result = app(WhatsAppProvider::class)->sendMessage(new OutgoingMessage(
+        // Reply through the instance the conversation belongs to.
+        $provider = app(WhatsAppProviderResolver::class)->forInstance($conversation->instance);
+
+        $result = $provider->sendMessage(new OutgoingMessage(
             recipient: $recipient,
             type: $type,
             content: isset($input['content']) ? (string) $input['content'] : null,
@@ -67,14 +91,13 @@ final class SendMessage
         return ['status' => $result->status, 'providerMessageId' => $result->providerMessageId];
     }
 
-    private function resolveRecipient(string $conversationId): ?string
+    private function resolveConversation(string $conversationId): ?Conversation
     {
         if (! Str::isUuid($conversationId)) {
             return null;
         }
 
-        return Conversation::with(['contact', 'group'])
-            ->find($conversationId)?->resolveProviderRecipient();
+        return Conversation::with(['contact', 'group', 'instance'])->find($conversationId);
     }
 
     /**

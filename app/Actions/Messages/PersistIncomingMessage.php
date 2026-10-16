@@ -8,6 +8,7 @@ use App\Actions\Conversations\FindOrCreateGroupConversation;
 use App\Data\IncomingMessage;
 use App\Enums\ConversationType;
 use App\Enums\MessageStatus;
+use App\Models\Instance;
 use App\Models\Message;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -21,13 +22,15 @@ final class PersistIncomingMessage
      * Persists an inbound/echo message and returns it, or null when the
      * provider message id was already stored (idempotency).
      */
-    public function handle(IncomingMessage $incoming): ?Message
+    public function handle(IncomingMessage $incoming, ?Instance $instance = null): ?Message
     {
+        $instance ??= Instance::default();
+
         $contact = FindOrCreateContact::run($incoming->senderContactId, $incoming->senderName);
 
         $conversation = $incoming->conversationType === ConversationType::Group
-            ? FindOrCreateGroupConversation::run($incoming->providerConversationId)
-            : FindOrCreateConversation::run($contact->id);
+            ? FindOrCreateGroupConversation::run($incoming->providerConversationId, $instance)
+            : FindOrCreateConversation::run($contact->id, $instance);
 
         $metadata = array_filter([
             ...$incoming->metadata,
@@ -42,6 +45,7 @@ final class PersistIncomingMessage
         $inserted = DB::table('messages')->insertOrIgnore([
             'id' => $id,
             'conversation_id' => $conversation->id,
+            'instance_id' => $conversation->instance_id,
             'provider_message_id' => $incoming->providerId,
             'direction' => $incoming->direction->value,
             'type' => $incoming->type->value,
