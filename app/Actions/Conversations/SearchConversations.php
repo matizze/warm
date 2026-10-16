@@ -19,6 +19,7 @@ final class SearchConversations
         $term = $filters['name'] ?? $filters['search'] ?? null;
 
         return Conversation::query()
+            ->when($filters['instance_id'] ?? null, fn (Builder $q, $v) => $q->where('instance_id', $v))
             ->when($filters['contactId'] ?? null, fn (Builder $q, $v) => $q->where('contact_id', $v))
             ->when($filters['groupId'] ?? null, fn (Builder $q, $v) => $q->where('group_id', $v))
             ->when($term ?? null, function (Builder $q, $v) {

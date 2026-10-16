@@ -8,6 +8,7 @@ use App\Actions\Messages\ApplyStatusUpdate;
 use App\Actions\Messages\IndexMessage;
 use App\Actions\Messages\PersistIncomingMessage;
 use App\Contracts\Normalizer;
+use App\Models\Instance;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,11 +23,15 @@ final class ReceiveWebhook
     {
         $payload = $request->all();
 
+        /** @var Instance|null $instance */
+        $instance = $request->attributes->get('warm.instance') ?? Instance::default();
+
         // Context shared by every log line produced while handling this
         // payload, including exceptions reported by the central handler.
         Log::withContext([
             'event' => $payload['event'] ?? null,
             'remote_jid' => $payload['data']['key']['remoteJid'] ?? null,
+            'instance_id' => $instance?->instance_id,
         ]);
 
         $normalizer = app(Normalizer::class);
@@ -38,7 +43,7 @@ final class ReceiveWebhook
                 'status' => $status->status->value,
             ]);
 
-            ApplyStatusUpdate::run($status->providerMessageId, $status->status);
+            ApplyStatusUpdate::run($status->providerMessageId, $status->status, $instance);
 
             return response()->json(['status' => 'ok', 'update' => $status->status->value]);
         }
@@ -48,8 +53,8 @@ final class ReceiveWebhook
             return response()->json(['status' => 'ignored']);
         }
 
-        $message = DB::transaction(function () use ($incoming) {
-            $message = PersistIncomingMessage::run($incoming);
+        $message = DB::transaction(function () use ($incoming, $instance) {
+            $message = PersistIncomingMessage::run($incoming, $instance);
 
             if ($message === null) {
                 return null;
