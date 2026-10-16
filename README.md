@@ -1,16 +1,17 @@
 # WARM — Seu WhatsApp com memória, consultado pela IA
 
-O **WARM** conecta **uma** conta de WhatsApp a um assistente de IA. Tudo o que
-chega e sai do WhatsApp (texto, áudio, imagem, vídeo, documento) é guardado em um
-banco de dados próprio. A IA então pode **pesquisar** esse conteúdo e **enviar**
-mensagens, usando o seu WhatsApp como fonte de contexto.
+O **WARM** conecta **uma ou mais** contas de WhatsApp a um assistente de IA.
+Tudo o que chega e sai do WhatsApp (texto, áudio, imagem, vídeo, documento) é
+guardado em um banco de dados próprio. A IA então pode **pesquisar** esse
+conteúdo e **enviar** mensagens, usando os seus WhatsApp como fonte de contexto.
 
-Pense assim: o WARM é um **arquivo vivo do seu WhatsApp** que a IA consegue ler e
-escrever. Em vez de você procurar uma conversa antiga rolando a tela, você
+Pense assim: o WARM é um **arquivo vivo dos seus WhatsApp** que a IA consegue ler
+e escrever. Em vez de você procurar uma conversa antiga rolando a tela, você
 pergunta à IA e ela responde com base no que foi conversado.
 
-> **Uma instalação = um WhatsApp.** Cada cópia do WARM cuida de um único número.
-> Se você quiser usar em outro número, faz uma nova instalação independente.
+> **Uma instalação = vários números.** Cada número de WhatsApp é uma
+> **instância**. A mesma stack do WARM atende todos, com webhook e MCP por
+> instância — veja [Múltiplas instâncias](#múltiplas-instâncias-vários-números).
 
 ---
 
@@ -26,11 +27,12 @@ pergunta à IA e ela responde com base no que foi conversado.
 8. [Conectar a IA (MCP)](#conectar-a-ia-mcp)
 9. [O que você pode pedir para a IA](#o-que-você-pode-pedir-para-a-ia)
 10. [Áudio, imagem e PDF (processamento)](#áudio-imagem-e-pdf-processamento)
-11. [Hospedar em produção](#hospedar-em-produção)
-12. [Segurança e privacidade](#segurança-e-privacidade)
-13. [Manutenção do dia a dia](#manutenção-do-dia-a-dia)
-14. [Problemas comuns](#problemas-comuns)
-15. [Apêndice técnico](#apêndice-técnico)
+11. [Múltiplas instâncias (vários números)](#múltiplas-instâncias-vários-números)
+12. [Hospedar em produção](#hospedar-em-produção)
+13. [Segurança e privacidade](#segurança-e-privacidade)
+14. [Manutenção do dia a dia](#manutenção-do-dia-a-dia)
+15. [Problemas comuns](#problemas-comuns)
+16. [Apêndice técnico](#apêndice-técnico)
 
 ---
 
@@ -193,13 +195,14 @@ O `.env` tem blocos. Abaixo, o que cada variável faz em linguagem simples.
 | `WHATSAPP_PROVIDER` | qual provedor usar. Hoje: `evolution`. |
 | `EVOLUTION_URL` | endereço do seu servidor Evolution. |
 | `EVOLUTION_API_KEY` | chave da sua conta Evolution. |
-| `EVOLUTION_INSTANCE_ID` | **nome exato** da instância (o número/conta). Se tiver espaço, use aspas: `"Minha Instância"`. |
+| `EVOLUTION_INSTANCE_ID` | nome da instância (o número/conta). **Só é usado na primeira migração**, para cadastrar a instância default na tabela `instances`. Depois disso, cada número é cadastrado na tabela — veja [Múltiplas instâncias](#múltiplas-instâncias-vários-números). Use um **slug** (sem espaços): ex. `henriquecosta`. |
 
 ### Segurança do webhook e admin
 | Variável | O que é |
 |---|---|
-| `WEBHOOK_TOKEN` | uma senha que o Evolution usa para provar que o aviso é legítimo. Sem ela configurada, só passa em ambiente de teste. **Use um valor aleatório longo em produção.** |
+| `WEBHOOK_TOKEN` | uma senha que o Evolution usa para provar que o aviso é legítimo. Sem ela configurada, só passa em ambiente de teste. **Use um valor aleatório longo em produção.** É o token das rotas legadas e o token inicial (default) na primeira migração. |
 | `ADMIN_TOKEN` | senha para disparar a reindexação por HTTP. Se vazio, esse endereço fica desativado. |
+| `MCP_TOKEN` | bearer da rota MCP **legada** (`POST /mcp`). Vazio desativa essa rota (404). Cada instância tem o seu próprio `mcp_token` na tabela `instances`. |
 
 ### Áudio, imagem e PDF (processamento por IA)
 | Variável | O que é |
@@ -232,7 +235,8 @@ O `.env` tem blocos. Abaixo, o que cada variável faz em linguagem simples.
    usar e **conecte o WhatsApp** (leitura do QR Code).
 2. Copie o **endereço do servidor**, a **chave de API** e o **nome da instância**
    e coloque no `.env` (`EVOLUTION_URL`, `EVOLUTION_API_KEY`,
-   `EVOLUTION_INSTANCE_ID`).
+   `EVOLUTION_INSTANCE_ID`). Esse nome será o `instance_id` da instância — nomeie
+   o número como um **slug** (sem espaços nem acentos), ex. `henriquecosta`.
 3. Gere um `WEBHOOK_TOKEN` aleatório:
 
    ```bash
@@ -243,8 +247,9 @@ O `.env` tem blocos. Abaixo, o que cada variável faz em linguagem simples.
 
 ### Apontar o webhook para o WARM
 
-O Evolution precisa **avisar** o WARM quando chega mensagem. Para isso ele chama
-o endereço `/webhook` do WARM.
+O Evolution precisa **avisar** o WARM quando chega mensagem. Cada número chama a
+rota `/instance/{instance_id}/webhook` do WARM, com o **token daquela** instância
+(não o `/webhook` global — esse fica só para a instância default).
 
 **Em produção** (o WARM tem um endereço público, ex. `https://warm.suaempresa.com`):
 
@@ -258,15 +263,18 @@ curl -X POST "https://SEU-EVOLUTION/webhook/set/NOME_DA_INSTANCIA" \
   -d '{
     "webhook": {
       "enabled": true,
-      "url": "https://warm.suaempresa.com/webhook?token=SEU_WEBHOOK_TOKEN",
+      "url": "https://warm.suaempresa.com/instance/NOME_DA_INSTANCIA/webhook?token=SEU_WEBHOOK_TOKEN",
       "byEvents": false,
       "events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE"]
     }
   }'
 ```
 
-Se o nome da instância tiver espaços, troque por `%20` na URL
-(ex.: `Matizze%20Suporte`).
+Numere as instâncias do Evolution como **slugs** (ex. `henriquecosta`), para o
+`{instance_id}` do caminho ficar URL-safe. Instâncias antigas com espaço
+continuam funcionando com `%20` (ex. `Matizze%20Suporte`), mas não use isso em
+números novos — veja
+[convenção de slug](#convenção-de-slug-do-instance_id-obrigatória).
 
 **Enquanto testa no seu computador**, o Evolution (que fica na internet) não
 consegue alcançar o seu `localhost`. Use um túnel para criar um endereço público
@@ -332,6 +340,21 @@ computador. Não precisa de senha nem de internet para o MCP.
 - **Outros clientes** — adicione um servidor MCP do tipo *stdio* com o comando
   `php artisan mcp:serve` e o projeto como diretório de trabalho.
 
+### MCP por HTTP (por instância)
+
+Em produção o WARM também expõe o MCP por **HTTP**, um endpoint por instância:
+
+```
+POST https://warm.suaempresa.com/instance/{instance_id}/mcp
+Authorization: Bearer MCP_TOKEN_DA_INSTANCIA
+```
+
+O bearer é o `mcp_token` da instância na tabela `instances`. As ferramentas
+operam no contexto daquela instância: `message.search`, `message.send` etc. só
+enxergam e enviam pelo número correspondente. É assim que um workspace (ex.:
+Multica) cadastra uma entrada MCP por número. A rota legada `POST /mcp` usa o
+`MCP_TOKEN` do `.env` e atende a instância default.
+
 Depois de conectado, é só conversar normalmente com a IA.
 
 ## O que você pode pedir para a IA
@@ -375,6 +398,83 @@ Sem a chave da OpenAI, a busca continua funcionando **por palavras**.
 
 ---
 
+## Múltiplas instâncias (vários números)
+
+O WARM atende **vários números de WhatsApp** na mesma instalação. Cada número é
+uma **instância**: um registro na tabela `instances` com as credenciais do
+Evolution e os tokens próprios daquele número.
+
+### Cadastro das instâncias (tabela, não só `.env`)
+
+| Campo | O que é |
+|---|---|
+| `instance_id` | identificador da instância. É também o **nome da instância no Evolution** e aparece na URL. Chave primária. |
+| `evolution_url` | endereço do servidor Evolution daquele número. |
+| `api_key` | chave de API do Evolution. |
+| `webhook_token` | token que valida o webhook **daquela** instância. |
+| `mcp_token` | bearer que valida o MCP **daquela** instância. Vazio desativa o MCP dela (401). |
+| `is_default` | a instância usada pelas rotas legadas `/webhook` e `/mcp`. |
+| `active` | instância inativa responde **404** (nunca 403). |
+
+Na primeira migração, a instância que estava no `.env`
+(`EVOLUTION_INSTANCE_ID`) é cadastrada automaticamente como **default**, e
+conversas/mensagens antigas são ligadas a ela — o upgrade não exige ação do
+operador. Dali em diante, números novos são cadastrados direto na tabela
+`instances`.
+
+Regra de isolamento: `conversations` e `messages` guardam `instance_id`, e a
+unicidade de conversa é `(contact_id, instance_id)` / `(group_id, instance_id)` —
+o mesmo contato pode existir em números diferentes, sem se misturar.
+
+### Convenção de slug do `instance_id` (obrigatória)
+
+O `instance_id` vai no **caminho da URL** e também é o **nome da instância no
+Evolution**, então precisa ser um **slug URL-safe**:
+
+- Permitido: letras minúsculas `a-z`, dígitos `0-9`, hífen `-` e sublinhado `_`.
+- Recomendado: `^[a-z0-9][a-z0-9_-]*$`, até 64 caracteres.
+- **Não** use espaços, acentos, maiúsculas nem caracteres especiais.
+
+Exemplos: `henriquecosta`, `matizze-suporte`, `comercial`.
+
+> **Legado.** A instância `Matizze Suporte` (com espaço) segue funcionando — o
+> espaço vira `%20` na URL (ex.: `/instance/Matizze%20Suporte/webhook`). É
+> suportado, porém **frágil**, e não deve servir de modelo: instâncias novas
+> devem ser criadas no Evolution já com nome de slug.
+
+### Webhook por instância
+
+Aponte o webhook de **cada número** para a rota da sua instância, com o token
+daquela instância (veja [Conectar o WhatsApp](#apontar-o-webhook-para-o-warm)):
+
+```
+https://warm.suaempresa.com/instance/{instance_id}/webhook?token=WEBHOOK_TOKEN_DA_INSTANCIA
+```
+
+- Token ausente/errado → `401`.
+- Instância inexistente ou inativa → `404`.
+
+O envio também é por instância: a resposta sai pelo número da conversa, não por
+uma instância fixa de ambiente.
+
+### MCP por instância
+
+Cada instância tem endpoint e bearer próprios (veja
+[MCP por HTTP](#mcp-por-http-por-instância)):
+
+```
+POST https://warm.suaempresa.com/instance/{instance_id}/mcp
+Authorization: Bearer MCP_TOKEN_DA_INSTANCIA
+```
+
+### Rotas legadas (número único)
+
+`POST /webhook` e `POST /mcp` continuam existindo e atendem a instância
+**default** (autenticadas pelos tokens de ambiente `WEBHOOK_TOKEN`/`MCP_TOKEN`).
+Servem instalações de número único e ficam disponíveis durante a transição.
+
+---
+
 ## Hospedar em produção
 
 Você tem dois caminhos. Escolha um.
@@ -392,7 +492,9 @@ cuida de servidor, HTTPS e dos processos contínuos.
 4. **Atenção ao banco:** a busca por significado precisa da extensão `pgvector`.
    Se o banco do provedor não oferecer, use um Postgres que suporte (Neon,
    Supabase, Amazon RDS com pgvector) ou um Postgres próprio.
-5. Aponte o webhook do Evolution para `https://SEU-ENDEREÇO/webhook?token=...`.
+5. Aponte o webhook de cada número do Evolution para
+   `https://SEU-ENDEREÇO/instance/{instance_id}/webhook?token=...` (uma instância
+   por número — veja [Múltiplas instâncias](#múltiplas-instâncias-vários-números)).
 
 ### Opção B — Servidor próprio (VPS)
 
@@ -422,7 +524,8 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
    * * * * * cd /var/www/warm && php artisan schedule:run >> /dev/null 2>&1
    ```
 9. **Storage** em S3/RustFS/MinIO (`STORAGE_DRIVER=s3`).
-10. **Webhook** apontando para `https://seu-dominio/webhook?token=...`.
+10. **Webhook** de cada número apontando para
+    `https://seu-dominio/instance/{instance_id}/webhook?token=...`.
 
 > **Resumo do que precisa ficar ligado em produção:** servidor web (Nginx/PHP),
 > worker da fila, agendador (cron) e o banco. O MCP roda onde a IA roda.
@@ -457,17 +560,44 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
 - **Atualizações**: rode `composer install`, `php artisan migrate --force` e
   `php artisan optimize` de novo.
 
+### Rollback de versão
+
+A stack roda uma imagem pinada (`APP_IMAGE` no Portainer), então voltar uma
+versão é trocar a imagem — e, se o schema tiver mudado, reverter as migrações
+(o `down` das migrações de multi-instância existe). Ordem e passos:
+
+1. **Backup** do banco antes de qualquer coisa (`pg_dump`).
+2. **Repin da imagem:** aponte `APP_IMAGE` para o digest anterior conhecido
+   (o digest pré-multi-instância usado no rollout foi
+   `main@sha256:e5fa1d15…`) e redeploy da stack. A imagem antiga não conhece
+   `instances`/`instance_id`, mas convive com o schema novo sem erro.
+3. **Reverter o schema** (só se precisar voltar ao estado anterior à feature),
+   de dentro de um container com acesso ao banco:
+   ```bash
+   php artisan migrate:rollback --step=2 --force
+   ```
+   As duas migrações (`instances` e `instance_id` em conversas/mensagens) têm
+   `down`: a coluna `instance_id` e a tabela `instances` são removidas, e a
+   unicidade de conversa por contato/grupo é restaurada. **Dados gravados após o
+   rollout são perdidos** no `down` — daí o backup do passo 1.
+4. **Validar:** `/up` (ou `/health`) responde 200 e a rota legada `/webhook`
+   continua autenticando com o `WEBHOOK_TOKEN` do `.env`.
+
+> Reverter **só a imagem** já devolve o comportamento de número único; o schema
+> novo é inerte para a imagem antiga. Reverter o schema é o passo destrutivo.
+
 ## Problemas comuns
 
 | Sintoma | Causa provável | Solução |
 |---|---|---|
 | Mensagens não chegam | webhook não aponta para o WARM | reconfigure o webhook no Evolution (endereço pode ter mudado, ex.: túnel reiniciado). |
-| Webhook responde 401 | `WEBHOOK_TOKEN` diferente do que está na URL | alinhe o token no `.env` e na URL do webhook. |
+| Webhook responde 401 | token da URL diferente do da instância (ou do `WEBHOOK_TOKEN`, na rota legada) | use o `webhook_token` da instância certa; na rota legada, alinhe com o `.env`. |
+| Webhook/MCP responde 404 | `instance_id` do caminho não existe ou está inativa | confira o `instance_id` na tabela `instances` e o campo `active`. |
 | Mídia não é baixada | worker da fila desligado | rode `php artisan queue:work`. |
 | Erro "Vite manifest" | front-end do Laravel não compilado | rode `npm install && npm run build` (ou ignore se não usa o front). |
 | Busca só acha por palavra | `OPENAI_API_KEY` ausente ou `EMBEDDING_ENABLED=false` | configure a chave e reindexe. |
 | "pgvector" não existe | banco sem a extensão `vector` | use um Postgres com pgvector (Docker/Neon/Supabase/RDS). |
-| Espaços no nome da instância dão erro | valor sem aspas no `.env` | coloque entre aspas: `EVOLUTION_INSTANCE_ID="Minha Instância"`. |
+| Nome de instância com espaço vira `%20` na URL | `instance_id` não é um slug | crie a instância no Evolution com nome de slug (`a-z0-9-_`); veja a convenção de slug. |
 
 ---
 
@@ -485,7 +615,10 @@ Para quem for mexer no código.
 ### Endpoints
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/webhook` | recebe eventos do provedor (auth: `x-webhook-token` ou `?token=`). |
+| POST | `/instance/{id}/webhook` | recebe eventos da instância `{id}` (auth: `x-webhook-token` ou `?token=` do `webhook_token` da instância; 401 sem/errado, 404 inexistente/inativa). |
+| POST | `/instance/{id}/mcp` | MCP HTTP no contexto da instância `{id}` (auth: `Authorization: Bearer <mcp_token>`; 401/404 como acima). |
+| POST | `/webhook` | rota legada → instância default (auth: `WEBHOOK_TOKEN`). |
+| POST | `/mcp` | rota legada → instância default (auth: `MCP_TOKEN`; 404 se vazio). |
 | GET | `/health` | `{"status":"ok"}`. |
 | POST | `/admin/reindex` | dispara a reindexação (auth: `x-admin-token`; 404 se `ADMIN_TOKEN` vazio). |
 
@@ -498,7 +631,7 @@ app/
 ├── Enums/          tipos (direção, status, tipo de mensagem...)
 ├── Integrations/   normalização e provider do Evolution
 ├── Mcp/            servidor MCP (JSON-RPC sobre stdio)
-├── Models/         Contact, Group, Conversation, Message, Media
+├── Models/         Instance, Contact, Group, Conversation, Message, Media
 ├── Processing/     PDF, áudio, imagem
 ├── Embeddings/     geração de vetores
 └── Support/        acesso ao storage de mídia
@@ -536,6 +669,10 @@ composer test         # testes
 ```
 
 ### Banco de dados
-`contacts`, `groups`, `conversations`, `messages`, `media` — sem `instance_id`
-(o banco **é** a instância). `messages` guarda `search_text` (busca por palavras)
-e `embedding vector(1536)` com índice HNSW (busca por significado).
+`instances` (chave `instance_id`, que é também o nome da instância no Evolution),
+`contacts`, `groups`, `conversations`, `messages`, `media`. `conversations` e
+`messages` guardam `instance_id` (com FK para `instances`); a unicidade de
+conversa é `(contact_id, instance_id)` / `(group_id, instance_id)`, então o mesmo
+contato pode existir em números diferentes. `contacts` e `groups` são globais
+(compartilhados entre instâncias). `messages` guarda também `search_text` (busca
+por palavras) e `embedding vector(1536)` com índice HNSW (busca por significado).
