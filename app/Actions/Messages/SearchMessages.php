@@ -85,6 +85,7 @@ final class SearchMessages
     private function baseQuery(array $filters): Builder
     {
         return Message::query()
+            ->when($filters['instance_id'] ?? null, fn (Builder $q, $v) => $q->where('instance_id', $v))
             ->when($filters['conversationId'] ?? null, fn (Builder $q, $v) => $q->where('conversation_id', $v))
             ->when($filters['contactId'] ?? null, fn (Builder $q, $v) => $q->where('sender_contact_id', $v))
             ->when($filters['type'] ?? null, fn (Builder $q, $v) => $q->where('type', $v))

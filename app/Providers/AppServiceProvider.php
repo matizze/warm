@@ -11,22 +11,36 @@ use App\Integrations\Evolution\EvolutionProvider;
 use App\Integrations\OpenAI\OpenAIAudioProcessor;
 use App\Integrations\OpenAI\OpenAIEmbeddingProvider;
 use App\Integrations\OpenAI\OpenAIImageProcessor;
+use App\Integrations\WhatsAppProviderResolver;
+use App\Models\Instance;
 use App\Processing\PdfProcessor;
 use App\Processing\ProcessingService;
 use Illuminate\Support\ServiceProvider;
 use Lorisleiva\Actions\Facades\Actions;
 use RuntimeException;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->app->singleton(WhatsAppProvider::class, function () {
+            // The default instance is the continuation of the former
+            // single-instance (env-driven) setup. Until the instances table is
+            // migrated (or if the database is unreachable) fall back to env.
+            try {
+                $config = Instance::default()?->providerConfig() ?? config('warm.evolution');
+            } catch (Throwable) {
+                $config = config('warm.evolution');
+            }
+
             return match ($provider = config('warm.provider')) {
-                'evolution' => new EvolutionProvider(config('warm.evolution')),
+                'evolution' => new EvolutionProvider($config),
                 default => throw new RuntimeException("Unsupported WhatsApp provider: {$provider}"),
             };
         });
+
+        $this->app->singleton(WhatsAppProviderResolver::class);
 
         $this->app->singleton(Normalizer::class, function () {
             return match ($provider = config('warm.provider')) {

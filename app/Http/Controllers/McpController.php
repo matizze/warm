@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Mcp\McpServer;
 use App\Mcp\ToolRegistry;
+use App\Models\Instance;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -26,7 +27,10 @@ final class McpController
             return $this->error(null, -32700, 'Parse error', 400);
         }
 
-        $server = new McpServer(app(ToolRegistry::class));
+        /** @var Instance|null $instance */
+        $instance = $request->attributes->get('warm.instance') ?? Instance::default();
+
+        $server = new McpServer(new ToolRegistry($instance));
 
         // JSON-RPC batch: an array of messages, answered with an array.
         if (array_is_list($payload)) {

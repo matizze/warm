@@ -24,6 +24,7 @@ class Message extends Model
 
     protected $fillable = [
         'conversation_id',
+        'instance_id',
         'provider_message_id',
         'direction',
         'type',
@@ -53,9 +54,26 @@ class Message extends Model
         ];
     }
 
+    /**
+     * A message inherits its instance from the conversation it belongs to.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Message $message) {
+            if ($message->instance_id === null && $message->conversation_id !== null) {
+                $message->instance_id = Conversation::find($message->conversation_id)?->instance_id;
+            }
+        });
+    }
+
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
+    }
+
+    public function instance(): BelongsTo
+    {
+        return $this->belongsTo(Instance::class, 'instance_id', 'instance_id');
     }
 
     public function sender(): BelongsTo

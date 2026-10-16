@@ -3,6 +3,7 @@
 namespace App\Actions\Messages;
 
 use App\Enums\MessageStatus;
+use App\Models\Instance;
 use App\Models\Message;
 use Lorisleiva\Actions\Concerns\AsAction;
 
@@ -10,9 +11,13 @@ final class ApplyStatusUpdate
 {
     use AsAction;
 
-    public function handle(string $providerMessageId, MessageStatus $status): void
+    public function handle(string $providerMessageId, MessageStatus $status, ?Instance $instance = null): void
     {
-        $message = Message::where('provider_message_id', $providerMessageId)->first();
+        $message = Message::query()
+            ->where('provider_message_id', $providerMessageId)
+            ->when($instance !== null, fn ($query) => $query->where('instance_id', $instance->instance_id))
+            ->first();
+
         if ($message === null) {
             return;
         }

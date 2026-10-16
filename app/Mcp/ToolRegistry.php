@@ -12,6 +12,7 @@ use App\Actions\Media\UploadMedia;
 use App\Actions\Messages\SearchMessages;
 use App\Actions\Messages\SendMessage;
 use App\Enums\SearchMode;
+use App\Models\Instance;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -22,6 +23,13 @@ use InvalidArgumentException;
  */
 final class ToolRegistry
 {
+    /**
+     * The instance this registry operates in, set by the `/instance/{id}/mcp`
+     * transport (or the default instance for the legacy `/mcp` route). Tool
+     * calls are scoped to it so one number never touches another's data.
+     */
+    public function __construct(private readonly ?Instance $instance = null) {}
+
     /**
      * @return list<array<string, mixed>>
      */
@@ -153,19 +161,34 @@ final class ToolRegistry
         $arguments = $this->validate($name, $arguments);
 
         return match ($name) {
-            'message.send' => SendMessage::run($arguments),
+            'message.send' => SendMessage::run($arguments, $this->instance),
             'contact.search' => SearchContacts::run($arguments),
             'contact.get' => GetContact::run((string) $arguments['contactId']),
             'group.search' => SearchGroups::run($arguments),
             'group.get' => GetGroup::run((string) $arguments['groupId']),
             'message.search' => SearchMessages::run(
-                $arguments,
+                $this->scoped($arguments),
                 SearchMode::tryFrom((string) ($arguments['mode'] ?? 'hybrid')) ?? SearchMode::Hybrid,
             ),
-            'conversation.search' => SearchConversations::run($arguments),
+            'conversation.search' => SearchConversations::run($this->scoped($arguments)),
             'media.download' => DownloadMedia::run((string) $arguments['messageId']),
             'media.upload' => UploadMedia::run($arguments),
         };
+    }
+
+    /**
+     * Restricts a search to the registry's instance.
+     *
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function scoped(array $arguments): array
+    {
+        if ($this->instance !== null) {
+            $arguments['instance_id'] = $this->instance->instance_id;
+        }
+
+        return $arguments;
     }
 
     /**
