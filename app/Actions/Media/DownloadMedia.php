@@ -3,7 +3,9 @@
 namespace App\Actions\Media;
 
 use App\Actions\Messages\IndexMessage;
+use App\Actions\Progress\RecordProgressFromMessage;
 use App\Enums\MessageDirection;
+use App\Enums\MessageType;
 use App\Integrations\WhatsAppProviderResolver;
 use App\Models\Conversation;
 use App\Models\Instance;
@@ -113,6 +115,12 @@ final class DownloadMedia
         );
 
         $media = ProcessMedia::run($media, $buffer);
+
+        // Register a progress entry for a team audio (a no-op outside the
+        // declared progress channels) now that its transcription is available.
+        if ($message->type === MessageType::Audio) {
+            RecordProgressFromMessage::dispatch($messageId);
+        }
 
         // Index the message once its media text is available.
         IndexMessage::dispatch($messageId);
