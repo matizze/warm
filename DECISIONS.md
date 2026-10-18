@@ -22,8 +22,9 @@ pessoal) na mesma stack, o WARM passou a suportar múltiplas instâncias.
   **default** (auth por `WEBHOOK_TOKEN`/`MCP_TOKEN` do env).
 - A primeira migração faz **backfill** da instância do env como default, ligando
   os dados existentes a ela sem ação do operador.
-- O `instance_id` é um **slug URL-safe** (`^[a-z0-9][a-z0-9_-]*$`), porque aparece
-  no caminho da URL e acumula a função de nome da instância no Evolution.
+- O `instance_id` é um **slug URL-safe** (norma: sem espaços/acentos/maiúsculas;
+  forma recomendada `^[a-z0-9][a-z0-9_-]*$`, não validada em código), porque
+  aparece no caminho da URL e acumula a função de nome da instância no Evolution.
   Instâncias do Evolution novas devem ser nomeadas como slug.
 
 **Consequences / follow-ups.**
@@ -43,9 +44,13 @@ pessoal) na mesma stack, o WARM passou a suportar múltiplas instâncias.
 - Instância não-default sempre constrói `EvolutionProvider`, ignorando
   `config('warm.provider')` (FYI).
 
-**Rollback.** Repin da stack para o digest anterior e, se necessário,
-`php artisan migrate:rollback --step=2 --force` (as duas migrações de
-multi-instância têm `down`). Ver README → Manutenção do dia a dia → Rollback.
+**Rollback.** Repin da imagem **não basta**: `conversations.instance_id` e
+`messages.instance_id` são `NOT NULL` sem default, então a imagem antiga quebra a
+ingestão ao inserir sem a coluna. O rollback do schema é obrigatório e roda
+**antes** de a imagem antiga atender, pela imagem **nova** (que conhece as
+migrações): `php artisan migrate:rollback --step=2 --force`, ou a alternativa
+revisável `deployment/rollback-multi-instance.sql` (deduplica conversas e limpa o
+`migrations`). Ver README → Manutenção do dia a dia → Rollback de versão.
 
 ## Object storage provider for media
 

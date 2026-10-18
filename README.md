@@ -274,7 +274,7 @@ Numere as instâncias do Evolution como **slugs** (ex. `henriquecosta`), para o
 `{instance_id}` do caminho ficar URL-safe. Instâncias antigas com espaço
 continuam funcionando com `%20` (ex. `Matizze%20Suporte`), mas não use isso em
 números novos — veja
-[convenção de slug](#convenção-de-slug-do-instance_id-obrigatória).
+[convenção de slug](#convenção-de-slug-do-instance_id).
 
 **Enquanto testa no seu computador**, o Evolution (que fica na internet) não
 consegue alcançar o seu `localhost`. Use um túnel para criar um endereço público
@@ -349,11 +349,19 @@ POST https://warm.suaempresa.com/instance/{instance_id}/mcp
 Authorization: Bearer MCP_TOKEN_DA_INSTANCIA
 ```
 
-O bearer é o `mcp_token` da instância na tabela `instances`. As ferramentas
-operam no contexto daquela instância: `message.search`, `message.send` etc. só
-enxergam e enviam pelo número correspondente. É assim que um workspace (ex.:
-Multica) cadastra uma entrada MCP por número. A rota legada `POST /mcp` usa o
-`MCP_TOKEN` do `.env` e atende a instância default.
+O bearer é o `mcp_token` da instância na tabela `instances`. As ferramentas de
+**mensagem** (`message.search`, `conversation.search`, `message.send`) operam no
+contexto daquela instância: só enxergam e enviam pelo número correspondente.
+
+Escopo do que **não** é por instância (igual ao registrado em `DECISIONS`):
+
+- `contact.*` e `group.*` são **globais** — contatos e grupos são compartilhados
+  entre os números.
+- `media.download` recebe só o `messageId` e **não** é escopado à instância; use
+  um id vindo de uma busca já escopada (`message.search`).
+
+É assim que um workspace (ex.: Multica) cadastra uma entrada MCP por número. A
+rota legada `POST /mcp` usa o `MCP_TOKEN` do `.env` e atende a instância default.
 
 Depois de conectado, é só conversar normalmente com a IA.
 
@@ -426,16 +434,19 @@ Regra de isolamento: `conversations` e `messages` guardam `instance_id`, e a
 unicidade de conversa é `(contact_id, instance_id)` / `(group_id, instance_id)` —
 o mesmo contato pode existir em números diferentes, sem se misturar.
 
-### Convenção de slug do `instance_id` (obrigatória)
+### Convenção de slug do `instance_id`
 
 O `instance_id` vai no **caminho da URL** e também é o **nome da instância no
-Evolution**, então precisa ser um **slug URL-safe**:
+Evolution**, então precisa ser **URL-safe**.
 
-- Permitido: letras minúsculas `a-z`, dígitos `0-9`, hífen `-` e sublinhado `_`.
-- Recomendado: `^[a-z0-9][a-z0-9_-]*$`, até 64 caracteres.
-- **Não** use espaços, acentos, maiúsculas nem caracteres especiais.
+**Norma (obrigatória para instâncias novas).** Sem espaços, acentos, maiúsculas
+nem caracteres que exijam escape na URL. Exemplos válidos: `henriquecosta`,
+`matizze-suporte`, `comercial`.
 
-Exemplos: `henriquecosta`, `matizze-suporte`, `comercial`.
+**Recomendação.** Um slug no formato `^[a-z0-9][a-z0-9_-]*$` — letras minúsculas,
+dígitos, hífen e sublinhado. Isso **não** é validado em código nem no schema (a
+coluna `instance_id` é uma `string`), então a disciplina é do operador ao criar a
+instância no Evolution.
 
 > **Legado.** A instância `Matizze Suporte` (com espaço) segue funcionando — o
 > espaço vira `%20` na URL (ex.: `/instance/Matizze%20Suporte/webhook`). É
@@ -562,29 +573,56 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
 
 ### Rollback de versão
 
-A stack roda uma imagem pinada (`APP_IMAGE` no Portainer), então voltar uma
-versão é trocar a imagem — e, se o schema tiver mudado, reverter as migrações
-(o `down` das migrações de multi-instância existe). Ordem e passos:
+A stack roda uma imagem pinada (`APP_IMAGE` no Portainer). Depois do rollout
+multi-instância, **repin da imagem sozinho NÃO é suficiente**: as colunas
+`conversations.instance_id` e `messages.instance_id` são `NOT NULL` **sem
+default** (migração `2026_10_16_120001`). A imagem pré-multi-instância não
+conhece a coluna e insere sem ela, então todo webhook de entrada falha com
+`not-null violation` — a ingestão quebra em silêncio. O rollback do schema é
+**obrigatório**, e tem que rodar **antes** de a imagem antiga atender.
+
+Passos (em janela de manutenção, com a ingestão parada):
 
 1. **Backup** do banco antes de qualquer coisa (`pg_dump`).
-2. **Repin da imagem:** aponte `APP_IMAGE` para o digest anterior conhecido
-   (o digest pré-multi-instância usado no rollout foi
-   `main@sha256:e5fa1d15…`) e redeploy da stack. A imagem antiga não conhece
-   `instances`/`instance_id`, mas convive com o schema novo sem erro.
-3. **Reverter o schema** (só se precisar voltar ao estado anterior à feature),
-   de dentro de um container com acesso ao banco:
+2. **Pré-checagem de duplicados.** O `down` recria `unique(contact_id)` e
+   `unique(group_id)`; se o mesmo contato/grupo já tem conversas em 2+ instâncias,
+   o índice não cria e o `migrate:rollback` falha (o `down` é atômico).
+   ```sql
+   SELECT contact_id, count(*) FROM conversations
+    WHERE contact_id IS NOT NULL GROUP BY contact_id HAVING count(*) > 1;
+   SELECT group_id, count(*) FROM conversations
+    WHERE group_id IS NOT NULL GROUP BY group_id HAVING count(*) > 1;
+   ```
+   Se retornarem linhas, trate-as antes (ex.: manter a conversa da instância
+   default) — ou use o `rollback-multi-instance.sql` do passo 3, que mantém a da
+   default, move as mensagens das demais para ela e apaga as conversas
+   esvaziadas.
+3. **Reverter o schema com a imagem ATUAL (nova).** É a única imagem que conhece
+   as duas migrações; rodar o `migrate:rollback` pela imagem antiga reverteria o
+   batch errado. Dentro de um container da imagem atual:
    ```bash
    php artisan migrate:rollback --step=2 --force
    ```
-   As duas migrações (`instances` e `instance_id` em conversas/mensagens) têm
-   `down`: a coluna `instance_id` e a tabela `instances` são removidas, e a
-   unicidade de conversa por contato/grupo é restaurada. **Dados gravados após o
-   rollout são perdidos** no `down` — daí o backup do passo 1.
-4. **Validar:** `/up` (ou `/health`) responde 200 e a rota legada `/webhook`
-   continua autenticando com o `WEBHOOK_TOKEN` do `.env`.
+   `--step=2` reverte exatamente as duas migrações de multi-instância — confirme
+   em `php artisan migrate:status` que elas são o último batch.
+   Alternativa revisável (mesmo efeito, com dedup e limpeza do `migrations`):
+   ```bash
+   psql "$DATABASE_URL" -f deployment/rollback-multi-instance.sql
+   ```
+   **Dados do multi-instância são perdidos** neste passo: a atribuição por
+   instância (`instance_id`) some e, no caminho do SQL, as conversas duplicadas
+   são mescladas — daí o backup do passo 1.
+4. **Repin da imagem:** aponte `APP_IMAGE` para o digest anterior conhecido
+   (o digest pré-multi-instância usado no rollout foi
+   `main@sha256:e5fa1d15…`) e redeploy da stack.
+5. **Validar:** `/up` (ou `/health`) responde 200; a rota legada `/webhook`
+   autentica com o `WEBHOOK_TOKEN` do `.env`; e uma mensagem de entrada é
+   persistida sem erro (a imagem antiga insere sem `instance_id`).
 
-> Reverter **só a imagem** já devolve o comportamento de número único; o schema
-> novo é inerte para a imagem antiga. Reverter o schema é o passo destrutivo.
+> **Ordem importa.** Pare a ingestão, reverta o schema pela imagem nova e só então
+> suba a imagem antiga. Reverter só a imagem (sem o schema) quebra a ingestão;
+> reverter o schema sem parar a ingestão pode perder mensagens do intervalo.
+> Reverter o schema é o passo destrutivo; reverter a imagem é reversível.
 
 ## Problemas comuns
 
