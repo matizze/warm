@@ -83,6 +83,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Attendance (customer question -> grounded reply)
+    |--------------------------------------------------------------------------
+    |
+    | `enabled` is the kill switch: false turns the whole flow off (no reply,
+    | no case). `dry_run` keeps it safe: the intended reply is recorded and
+    | logged but never sent. `instances` / `conversations` are the scope — an
+    | empty scope means nothing is answered. `tone` is configurable because the
+    | final wording is still open (Henrique validates it); nothing is fixed in
+    | code.
+    |
+    */
+
+    'attendance' => [
+        'enabled' => filter_var(env('ATTENDANCE_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'dry_run' => filter_var(env('ATTENDANCE_DRY_RUN', true), FILTER_VALIDATE_BOOL),
+        'instances' => array_values(array_filter(array_map('trim', explode(',', (string) env('ATTENDANCE_INSTANCES', ''))))),
+        'conversations' => array_values(array_filter(array_map('trim', explode(',', (string) env('ATTENDANCE_CONVERSATIONS', ''))))),
+        'min_confidence' => (float) env('ATTENDANCE_MIN_CONFIDENCE', 0.6),
+        'knowledge_limit' => (int) env('ATTENDANCE_KNOWLEDGE_LIMIT', 5),
+        'answer_model' => env('ATTENDANCE_ANSWER_MODEL', 'gpt-4o-mini'),
+        'tone' => env('ATTENDANCE_TONE', 'Próximo e educado, linguagem simples do dia a dia; não prometa prazos que o time não confirmou.'),
+        'openai_key' => env('OPENAI_API_KEY', ''),
+        'openai_base_url' => rtrim(env('OPENAI_BASE_URL', 'https://api.openai.com/v1'), '/'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Scheduled reindex
     |--------------------------------------------------------------------------
     */

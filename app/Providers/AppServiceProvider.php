@@ -2,12 +2,16 @@
 
 namespace App\Providers;
 
+use App\Attendance\MessageKnowledgeBase;
+use App\Contracts\AnswerGenerator;
 use App\Contracts\EmbeddingProvider;
+use App\Contracts\KnowledgeBase;
 use App\Contracts\Normalizer;
 use App\Contracts\WhatsAppProvider;
 use App\Embeddings\EmbeddingService;
 use App\Integrations\Evolution\EvolutionNormalizer;
 use App\Integrations\Evolution\EvolutionProvider;
+use App\Integrations\OpenAI\OpenAIAnswerGenerator;
 use App\Integrations\OpenAI\OpenAIAudioProcessor;
 use App\Integrations\OpenAI\OpenAIEmbeddingProvider;
 use App\Integrations\OpenAI\OpenAIImageProcessor;
@@ -58,6 +62,10 @@ class AppServiceProvider extends ServiceProvider
             new OpenAIAudioProcessor(config('warm.processing')),
             new OpenAIImageProcessor(config('warm.processing')),
         ]));
+
+        $this->app->singleton(KnowledgeBase::class, fn () => new MessageKnowledgeBase);
+
+        $this->app->singleton(AnswerGenerator::class, fn () => new OpenAIAnswerGenerator(config('warm.attendance')));
     }
 
     public function boot(): void
