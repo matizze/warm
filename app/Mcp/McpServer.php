@@ -158,6 +158,15 @@ final class McpServer
 
     private function log(string $message): void
     {
-        fwrite(STDERR, "[warm-mcp] {$message}\n");
+        // STDERR only exists in the CLI SAPI; the HTTP transport (artisan
+        // serve/fpm) still needs to log tool failures without breaking the
+        // JSON-RPC response.
+        if (defined('STDERR')) {
+            fwrite(STDERR, "[warm-mcp] {$message}\n");
+
+            return;
+        }
+
+        error_log("[warm-mcp] {$message}");
     }
 }

@@ -356,9 +356,16 @@ contexto daquela instância: só enxergam e enviam pelo número correspondente.
 Escopo do que **não** é por instância (igual ao registrado em `DECISIONS`):
 
 - `contact.*` e `group.*` são **globais** — contatos e grupos são compartilhados
-  entre os números.
+  entre os números. A escrita (`contact.upsert`) respeita o número que a chamou:
+  cria a conversa só naquela instância e recusa alterar um contato que já pertence
+  a outra instância. A base de contatos em si continua única e compartilhada; a
+  leitura por `contact.search`/`contact.get` também continua global.
 - `media.download` recebe só o `messageId` e **não** é escopado à instância; use
   um id vindo de uma busca já escopada (`message.search`).
+
+> **Agenda do aparelho.** `contact.upsert` grava na base de contatos do WARM, não
+> na agenda do celular: a API do WhatsApp/Evolution não expõe escrita de contato
+> no aparelho. O contato fica disponível para busca, contexto e envio pelo WARM.
 
 É assim que um workspace (ex.: Multica) cadastra uma entrada MCP por número. A
 rota legada `POST /mcp` usa o `MCP_TOKEN` do `.env` e atende a instância default.
@@ -367,13 +374,14 @@ Depois de conectado, é só conversar normalmente com a IA.
 
 ## O que você pode pedir para a IA
 
-A IA tem 9 "ferramentas" do WARM. Em linguagem simples:
+A IA tem 10 "ferramentas" do WARM. Em linguagem simples:
 
 | Ferramenta | O que faz | Exemplo de pedido |
 |---|---|---|
 | `message.search` | pesquisa mensagens | "O que foi falado sobre o contrato do João?" |
 | `conversation.search` | encontra conversas | "Ache a conversa com o cliente XPTO" |
 | `contact.search` / `contact.get` | procura contatos e contexto | "Me lembre quem é a Ana" |
+| `contact.upsert` | cria ou atualiza um contato (telefone + nome/notas) | "Salve o João, +55 11 99999-0000, cliente do plano anual" |
 | `group.search` / `group.get` | procura grupos e contexto | "Qual o assunto do grupo de implantação?" |
 | `message.send` | envia mensagem | "Manda pro João: reunião amanhã às 10h" |
 | `media.download` | baixa a mídia de uma mensagem | "Baixe o áudio daquela mensagem" |
