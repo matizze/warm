@@ -4,8 +4,9 @@ namespace App\Support;
 
 /**
  * Canonicalizes WhatsApp phone numbers for contact writes. The database keeps
- * the E.164 digits (no "+"), which is also the number Evolution expects when
- * sending; the user-facing E.164 form and the WhatsApp JID are derived from it.
+ * the provider JID (E.164 digits + "@s.whatsapp.net"), the same key ingestion
+ * uses for inbound messages; the user-facing E.164 form and the "@c.us" JID are
+ * derived from it for responses.
  */
 final class PhoneNumber
 {
@@ -65,5 +66,13 @@ final class PhoneNumber
     public static function jid(string $digits): string
     {
         return $digits.'@c.us';
+    }
+
+    /**
+     * Storage key shared with inbound ingestion (FindOrCreateContact).
+     */
+    public static function contactJid(string $digits): string
+    {
+        return $digits.'@s.whatsapp.net';
     }
 }

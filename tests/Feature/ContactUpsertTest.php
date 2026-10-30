@@ -5,19 +5,41 @@ namespace Tests\Feature;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Instance;
+use App\Models\Message;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class ContactUpsertTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function makeInstance(string $instanceId, string $token): Instance
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function makeInstance(string $instanceId, string $token, array $attributes = []): Instance
     {
-        return Instance::factory()->create([
+        return Instance::factory()->create($attributes + [
             'instance_id' => $instanceId,
             'mcp_token' => $token,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function inbound(string $id, string $jid): array
+    {
+        return [
+            'event' => 'messages.upsert',
+            'data' => [
+                'key' => ['remoteJid' => $jid, 'fromMe' => false, 'id' => $id],
+                'pushName' => 'Ana',
+                'message' => ['conversation' => 'Oi'],
+                'messageType' => 'conversation',
+                'messageTimestamp' => 1758000000,
+            ],
+        ];
     }
 
     /**
@@ -59,7 +81,7 @@ class ContactUpsertTest extends TestCase
         $this->assertSame('support', $result['payload']['contact']['instanceId']);
 
         $contact = Contact::sole();
-        $this->assertSame('5511988887777', $contact->phone_number);
+        $this->assertSame('5511988887777@s.whatsapp.net', $contact->phone_number);
         $this->assertSame('Cliente do plano anual', $contact->observations);
 
         $conversation = Conversation::sole();
@@ -149,6 +171,70 @@ class ContactUpsertTest extends TestCase
         $this->assertSame($contact->id, $result['payload']['contact']['id']);
         $this->assertSame(1, Contact::count());
         $this->assertSame('Bruno', $contact->fresh()->name);
+    }
+
+    public function test_a_contact_saved_before_the_first_inbound_does_not_duplicate(): void
+    {
+        Queue::fake();
+        $instance = $this->makeInstance('support', 'mcp-support', ['webhook_token' => 'wh-support']);
+
+        $this->callTool($instance, 'contact.upsert', [
+            'phoneNumber' => '+55 (11) 98888-7777',
+            'name' => 'Ana',
+        ]);
+
+        $this->postJson('/instance/support/webhook', $this->inbound('S-1', '5511988887777@s.whatsapp.net'), [
+            'x-webhook-token' => 'wh-support',
+        ])->assertOk()->assertJson(['status' => 'ok', 'duplicate' => false]);
+
+        $contact = Contact::sole();
+        $this->assertSame('5511988887777@s.whatsapp.net', $contact->phone_number);
+        $this->assertSame('Ana', $contact->name);
+
+        $conversation = Conversation::sole();
+        $this->assertSame($contact->id, $conversation->contact_id);
+        $this->assertSame('support', $conversation->instance_id);
+
+        $this->assertSame(1, Message::count());
+        $this->assertSame($conversation->id, Message::sole()->conversation_id);
+    }
+
+    public function test_a_legacy_bare_digits_contact_is_normalized_to_the_canonical_key(): void
+    {
+        $instance = $this->makeInstance('support', 'mcp-support');
+        $contact = Contact::create(['phone_number' => '5511977776666', 'name' => null]);
+        Conversation::create(['type' => 'contact', 'contact_id' => $contact->id, 'instance_id' => 'support']);
+
+        $result = $this->callTool($instance, 'contact.upsert', [
+            'phoneNumber' => '+55 (11) 97777-6666',
+            'name' => 'Bruno',
+        ]);
+
+        $this->assertFalse($result['isError']);
+        $this->assertFalse($result['payload']['created']);
+        $this->assertSame($contact->id, $result['payload']['contact']['id']);
+        $this->assertSame(1, Contact::count());
+        $this->assertSame('5511977776666@s.whatsapp.net', $contact->fresh()->phone_number);
+        $this->assertSame('5511977776666', $result['payload']['contact']['phoneNumber']);
+    }
+
+    public function test_the_lookup_is_deterministic_when_both_key_formats_exist(): void
+    {
+        $instance = $this->makeInstance('support', 'mcp-support');
+
+        $legacy = Contact::create(['phone_number' => '5511966665555', 'name' => 'Legado']);
+        $canonical = Contact::create(['phone_number' => '5511966665555@s.whatsapp.net', 'name' => 'Canônico']);
+
+        $result = $this->callTool($instance, 'contact.upsert', [
+            'phoneNumber' => '5511966665555',
+            'name' => 'Ana',
+        ]);
+
+        $this->assertFalse($result['isError']);
+        $this->assertSame($canonical->id, $result['payload']['contact']['id']);
+        $this->assertSame('Ana', $canonical->fresh()->name);
+        $this->assertSame('Legado', $legacy->fresh()->name);
+        $this->assertSame(2, Contact::count());
     }
 
     public function test_the_created_contact_is_visible_in_contact_and_conversation_search(): void

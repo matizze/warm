@@ -39,9 +39,11 @@ pessoal) na mesma stack, o WARM passou a suportar múltiplas instâncias.
 - `contact.upsert` (MTZ-454) grava na base global, mas é isolado no que toca
   outra instância: recusa alterar contato que já tem conversa em outro número e
   cria a conversa só na instância chamadora. A leitura (`contact.search`,
-  `contact.get`) segue global. Se o produto quiser contatos realmente separados
-  por número, é preciso migrar `contacts` para ter `instance_id` — decisão ainda
-  não tomada.
+  `contact.get`) segue global. A chave canônica de `contacts.phone_number` é o
+  JID do provedor (`<dígitos>@s.whatsapp.net`), o mesmo da ingestão; o upsert
+  normaliza linhas antigas (dígitos/`+`/`@c.us`) ao reaproveitá-las. Se o produto
+  quiser contatos realmente separados por número, é preciso migrar `contacts`
+  para ter `instance_id` — decisão ainda não tomada.
 - `instances.is_default` tem índice simples, não único: dois defaults fariam
   `Instance::default()` retornar linha arbitrária. Um índice parcial único
   resolveria.

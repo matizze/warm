@@ -16,7 +16,8 @@ use Lorisleiva\Actions\Concerns\AsAction;
  * The contact table is global (shared by the numbers), so isolation happens at
  * the conversation layer: a contact already used by other instances is not
  * mutated from a different number, and the created conversation always belongs
- * to the calling instance.
+ * to the calling instance. The stored key is the provider JID
+ * ("<digits>@s.whatsapp.net"), the same one inbound ingestion uses.
  */
 final class UpsertContact
 {
@@ -42,14 +43,25 @@ final class UpsertContact
             throw new InvalidArgumentException('Telefone inválido: informe um número com DDI/DDD (E.164).');
         }
 
-        return DB::transaction(function () use ($digits, $name, $observations, $instance) {
-            $contact = $this->findByDigits($digits);
+        $canonical = PhoneNumber::contactJid($digits);
+
+        return DB::transaction(function () use ($digits, $canonical, $name, $observations, $instance) {
+            $contact = $this->findContact($digits, $canonical);
             $created = $contact === null;
 
             if ($created) {
-                $contact = new Contact(['phone_number' => $digits]);
-            } else {
+                $contact = Contact::firstOrCreate(['phone_number' => $canonical]);
+                $created = $contact->wasRecentlyCreated;
+            }
+
+            if (! $created) {
                 $this->assertBelongsToInstance($contact, $instance);
+
+                // Rows from before the canonical key (bare digits, "+" or
+                // "@c.us") are rewritten so the stored key matches ingestion.
+                if ($contact->phone_number !== $canonical) {
+                    $contact->phone_number = $canonical;
+                }
             }
 
             if (is_string($name) && trim($name) !== '') {
@@ -85,13 +97,32 @@ final class UpsertContact
     }
 
     /**
-     * Existing rows may hold a formatted number, a "+" prefix or a provider
-     * JID (older webhooks stored "<number>@s.whatsapp.net").
+     * Looks the contact up by the canonical key first (indexed, one row) and
+     * then by the legacy formats. Ties are broken deterministically so a
+     * duplicated legacy row never makes the upsert pick an arbitrary contact.
      */
-    private function findByDigits(string $digits): ?Contact
+    private function findContact(string $digits, string $canonical): ?Contact
     {
+        $contact = Contact::query()
+            ->where('phone_number', $canonical)
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->first();
+
+        if ($contact !== null) {
+            return $contact;
+        }
+
+        $legacy = [$digits, '+'.$digits, PhoneNumber::jid($digits)];
+
         return Contact::query()
-            ->whereRaw("regexp_replace(phone_number, '[^0-9]', '', 'g') = ?", [$digits])
+            ->whereIn('phone_number', $legacy)
+            ->orderByRaw(
+                'CASE phone_number WHEN ? THEN 0 WHEN ? THEN 1 WHEN ? THEN 2 ELSE 3 END',
+                $legacy,
+            )
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->first();
     }
 

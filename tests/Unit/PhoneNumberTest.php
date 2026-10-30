@@ -60,5 +60,6 @@ class PhoneNumberTest extends TestCase
     {
         $this->assertSame('+5511988887777', PhoneNumber::e164('5511988887777'));
         $this->assertSame('5511988887777@c.us', PhoneNumber::jid('5511988887777'));
+        $this->assertSame('5511988887777@s.whatsapp.net', PhoneNumber::contactJid('5511988887777'));
     }
 }
