@@ -541,6 +541,74 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
 > **Resumo do que precisa ficar ligado em produção:** servidor web (Nginx/PHP),
 > worker da fila, agendador (cron) e o banco. O MCP roda onde a IA roda.
 
+### Pipeline de imagem e deploy (GHCR)
+
+O workflow [`.github/workflows/docker.yaml`](.github/workflows/docker.yaml)
+constrói a imagem da stack e publica no GHCR. Build e publicação são separados:
+pull request só valida o build, e deploy só acontece em `push` para a `main`.
+
+| Evento | Build | Tags publicadas | Deploy |
+|---|---|---|---|
+| `pull_request` para `main`/`develop` | sim (local, amd64) | **nenhuma** | não |
+| `push` em `develop` | multi-arch (`amd64`,`arm64`) | `:<sha-completo>`, `:develop` | não |
+| `push` em `main` | multi-arch (`amd64`,`arm64`) | `:<sha-completo>`, `:main`, `:latest` | sim, por digest, após aprovação |
+
+- **PR nunca faz login no GHCR nem push.** O build usa `--load` e cache do
+  GitHub Actions apenas para validar a imagem.
+- **`:<sha-completo>` é a tag imutável de referência.** Use o SHA (ou o digest)
+  para deploy e rollback; `:main` e `:develop` são atalhos móveis da branch.
+- **`:latest` só é publicado a partir da `main`.** PRs e `develop` nunca mexem
+  em `:latest`.
+- O job de deploy roda **depois** do build+push, com `concurrency` serial (sem
+  `cancel-in-progress`), no GitHub Environment `production` (aprovação
+  obrigatória). Ele envia a imagem pelo **digest** (`ghcr.io/matizze/warm@sha256:…`),
+  nunca por tag móvel, e verifica no final que o digest em execução na stack é o
+  mesmo que foi publicado.
+
+**Secrets do environment `production`** (Settings → Environments → `production`;
+não crie como secret de repositório):
+
+| Secret | Uso |
+|---|---|
+| `DEPLOY_WEBHOOK` | URL que atualiza o `APP_IMAGE` da stack `warm` e faz o redeploy. |
+| `DEPLOY_TOKEN` | Token enviado como `Authorization: Bearer` ao webhook e ao endpoint de verificação. |
+| `DEPLOY_STATUS_URL` | `GET` que retorna o digest da imagem em execução na stack. |
+
+Contrato usado pelo workflow (URLs e token nunca são ecoados nos logs):
+
+```jsonc
+// POST DEPLOY_WEBHOOK
+{
+  "image": "ghcr.io/matizze/warm@sha256:<digest>",
+  "sha": "<sha-completo-do-commit>",
+  "digest": "sha256:<digest>"
+}
+
+// GET DEPLOY_STATUS_URL
+{ "digest": "sha256:<digest>", "image": "ghcr.io/matizze/warm@sha256:<digest>" }
+```
+
+O deploy só é considerado concluído quando o `digest` retornado pelo endpoint
+de status é igual ao digest publicado pelo job. Se não convergir, o job falha.
+
+#### Deploy manual e rollback
+
+O deploy normal é automático ao mergear na `main`. Para operar manualmente
+(ex.: rollback ou repin), atualize o `APP_IMAGE` da stack `warm` no Portainer
+para o digest desejado e faça o redeploy:
+
+```text
+APP_IMAGE=ghcr.io/matizze/warm@sha256:<digest>
+```
+
+- **Rollback:** aponte `APP_IMAGE` de volta para o digest anterior conhecido e
+  redeploy da stack. Para mudanças que envolveram migração de schema, siga
+  também a seção [Rollback de versão](#rollback-de-versão) abaixo.
+- **Nunca** use `:latest`, `:main` ou `:develop` em produção: elas mudam sem
+  aviso e não permitem provar qual commit está rodando.
+- O digest de cada build fica no resumo do job de publicação (Actions → run →
+  Summary) e na tag `:<sha-completo>` (`docker buildx imagetools inspect`).
+
 ---
 
 ## Segurança e privacidade
@@ -614,7 +682,8 @@ Passos (em janela de manutenção, com a ingestão parada):
    são mescladas — daí o backup do passo 1.
 4. **Repin da imagem:** aponte `APP_IMAGE` para o digest anterior conhecido
    (o digest pré-multi-instância usado no rollout foi
-   `main@sha256:e5fa1d15…`) e redeploy da stack.
+   `main@sha256:e5fa1d15…`) e redeploy da stack. Use sempre
+   `ghcr.io/matizze/warm@sha256:…` — nunca `:latest`, `:main` ou `:develop`.
 5. **Validar:** `/up` (ou `/health`) responde 200; a rota legada `/webhook`
    autentica com o `WEBHOOK_TOKEN` do `.env`; e uma mensagem de entrada é
    persistida sem erro (a imagem antiga insere sem `instance_id`).
