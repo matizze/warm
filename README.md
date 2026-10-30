@@ -363,6 +363,34 @@ Escopo do que **não** é por instância (igual ao registrado em `DECISIONS`):
 É assim que um workspace (ex.: Multica) cadastra uma entrada MCP por número. A
 rota legada `POST /mcp` usa o `MCP_TOKEN` do `.env` e atende a instância default.
 
+### Enviar por contato (sem histórico)
+
+`message.send` aceita **exatamente um** entre `conversationId` e `contactId`:
+
+- `conversationId` continua como antes: envia pela conversa existente.
+- `contactId` envia direto ao contato. O telefone cadastrado é normalizado para
+  E.164/JID e validado antes de qualquer chamada; a conversa daquela instância é
+  **reutilizada** se já existir ou **criada** se não existir. Não é preciso que o
+  contato tenha mandado mensagem antes.
+
+O retorno traz `messageId` (id interno), `providerMessageId`, `conversationId`,
+`contactId` e `status`: `accepted`, `sent`, `delivered`, `read` ou `failed`.
+Telefone ausente/inválido e contato inexistente retornam erro JSON **sem** criar
+conversa nem mensagem. A mensagem enviada é gravada com o id do provedor; o
+webhook de confirmação (`messages.update`) atualiza o status para `delivered`/
+`read` quando o provedor avisa — o WARM nunca marca como entregue só por ter
+gravado localmente.
+
+Para retries, informe `idempotencyKey` (uma chave estável por mensagem lógica):
+um reenvio com a mesma chave devolve o resultado anterior e **não** dispara outra
+mensagem. Sem a chave, cada chamada é um envio novo.
+
+> **Template / janela de 24h.** O Evolution usa o protocolo do WhatsApp Web
+> (Baileys) e permite iniciar conversa com texto livre, inclusive sem histórico.
+> Provedores oficiais (WhatsApp Cloud API) exigem template aprovado fora da
+> janela de 24h. O WARM não contorna essa regra: se o provedor recusar por
+> template/janela, a resposta traz `status: failed` e o motivo do provedor.
+
 Depois de conectado, é só conversar normalmente com a IA.
 
 ## O que você pode pedir para a IA
@@ -375,7 +403,7 @@ A IA tem 9 "ferramentas" do WARM. Em linguagem simples:
 | `conversation.search` | encontra conversas | "Ache a conversa com o cliente XPTO" |
 | `contact.search` / `contact.get` | procura contatos e contexto | "Me lembre quem é a Ana" |
 | `group.search` / `group.get` | procura grupos e contexto | "Qual o assunto do grupo de implantação?" |
-| `message.send` | envia mensagem | "Manda pro João: reunião amanhã às 10h" |
+| `message.send` | envia mensagem por conversa (`conversationId`) ou por contato (`contactId`, mesmo sem histórico) | "Manda pro João: reunião amanhã às 10h" |
 | `media.download` | baixa a mídia de uma mensagem | "Baixe o áudio daquela mensagem" |
 | `media.upload` | adiciona uma mídia para enviar depois | "Prepare essa foto para enviar" |
 
