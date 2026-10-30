@@ -4,6 +4,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
@@ -25,6 +26,12 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "branch_name=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login GHCR
         uses: docker/login-action@v3
         with:
@@ -37,20 +44,18 @@ jobs:
           GIT_HASH="${{ steps.vars.outputs.sha_short }}"
           BRANCH="${{ steps.vars.outputs.branch_name }}"
 
-          echo "Building ${REGISTRY}:${GIT_HASH} (${BRANCH})"
+          echo "Building ${REGISTRY}:${GIT_HASH} (${BRANCH}) for linux/amd64,linux/arm64"
 
-          docker build \
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
             --build-arg WWWUSER=1000 \
             --build-arg WWWGROUP=1000 \
             -f deployment/Dockerfile \
             -t ${REGISTRY}:${GIT_HASH} \
             -t ${REGISTRY}:${BRANCH} \
             -t ${REGISTRY}:latest \
+            --push \
             .
-
-          docker push ${REGISTRY}:${GIT_HASH}
-          docker push ${REGISTRY}:${BRANCH}
-          docker push ${REGISTRY}:latest
 
           echo "Pushed: ${REGISTRY}:${GIT_HASH}"
 
