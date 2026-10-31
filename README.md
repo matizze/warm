@@ -227,6 +227,18 @@ O `.env` tem blocos. Abaixo, o que cada variável faz em linguagem simples.
 | `REINDEX_CRON` | quando rodar (formato cron; `"0 3 * * *"` = todo dia às 3h). |
 | `REINDEX_TZ` | fuso horário (ex.: `America/Sao_Paulo`). |
 
+### Atendimento de dúvidas do cliente
+| Variável | O que é |
+|---|---|
+| `ATTENDANCE_ENABLED` | **kill switch**. `false` desliga o fluxo inteiro (não responde nem registra). |
+| `ATTENDANCE_DRY_RUN` | `true` (padrão): registra e loga a resposta pretendida, **sem enviar**. |
+| `ATTENDANCE_INSTANCES` | escopo: `instance_id`s (separados por vírgula) que o atendimento pode responder. |
+| `ATTENDANCE_CONVERSATIONS` | escopo adicional: UUIDs de conversas específicas. |
+| `ATTENDANCE_MIN_CONFIDENCE` | similaridade mínima (0..1) do conhecimento para responder. |
+| `ATTENDANCE_KNOWLEDGE_LIMIT` | quantos trechos de conhecimento alimentam a resposta. |
+| `ATTENDANCE_ANSWER_MODEL` | modelo de geração da resposta. |
+| `ATTENDANCE_TONE` | tom da resposta (ainda em aberto; a redação não é fixa no código). |
+
 ---
 
 ## Conectar o WhatsApp (Evolution)
@@ -485,6 +497,35 @@ Authorization: Bearer MCP_TOKEN_DA_INSTANCIA
 Servem instalações de número único e ficam disponíveis durante a transição.
 
 ---
+
+## Atendimento de dúvidas do cliente
+
+Quando um cliente manda uma **dúvida por texto**, o WARM pode responder na
+mesma conversa, ancorado no conhecimento já guardado (as conversas/arquivos
+daquela instância, buscados por significado). O fluxo:
+
+```
+mensagem do cliente → está no escopo e ligado? → busca conhecimento →
+segurança suficiente? → gera resposta → responde na mesma conversa
+                          └── não → NÃO responde; registra o caso
+```
+
+- **Nunca inventa.** A resposta usa só o conhecimento encontrado. Sem
+  segurança (similaridade abaixo de `ATTENDANCE_MIN_CONFIDENCE` ou o gerador
+  se recusa), **nada é enviado** e o caso fica registrado em `attendance_cases`
+  (é o gancho do handoff humano, que é outra história).
+- **Escopo explícito.** Só responde em instâncias/conversas listadas em
+  `ATTENDANCE_INSTANCES` / `ATTENDANCE_CONVERSATIONS`. Escopo vazio = nada é
+  respondido (uma instalação nova não responde por acidente).
+- **Kill switch.** `ATTENDANCE_ENABLED=false` desliga tudo.
+- **Começa em dry-run.** `ATTENDANCE_DRY_RUN=true` (padrão) registra e loga a
+  resposta sem enviar nada ao cliente.
+- **Tom configurável.** `ATTENDANCE_TONE` alimenta o prompt; a redação final
+  ainda será validada (não está fixa no código).
+- **Idempotente.** A mesma mensagem nunca gera dois casos nem duas respostas.
+
+A resposta sai pela **instância da conversa** (o mesmo número que recebeu),
+reusando o mapeamento instância↔conversa↔contato já existente.
 
 ## Hospedar em produção
 

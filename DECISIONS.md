@@ -1,5 +1,41 @@
 # Decisions
 
+## Atendimento de dúvidas do cliente (dry-run, escopo por instância/conversa)
+
+**Status:** decided / implemented (2026-10-18, MTZ-222 H4 / MTZ-224)
+
+**Context.** O cliente manda uma dúvida no WhatsApp e deve receber resposta na
+mesma conversa. O conhecimento é o próprio arquivo do WARM (mensagens/mídia já
+indexadas com embeddings); uma "base aprovada" entra depois. O risco central é a
+IA inventar, então o fluxo precisa de guardrail e de um modo seguro para ligar.
+
+**Decision.**
+
+- Fluxo em `App\Actions\Attendance\AnswerCustomerQuestion`, disparado pelo
+  webhook para mensagem **de texto recebida** (assíncrono, fila).
+- Ports `KnowledgeBase` (busca ancorada) e `AnswerGenerator` (geração). O padrão
+  usa busca **semântica** no arquivo da instância; o gerador usa o prompt que
+  **só responde com o conhecimento** e devolve `ABSTAIN` quando não há segurança.
+- Guardrail em duas camadas: similaridade mínima (`ATTENDANCE_MIN_CONFIDENCE`)
+  e abstenção do gerador. Sem segurança, **não responde** e registra o caso em
+  `attendance_cases` (gancho do handoff, que é a H5).
+- **Escopo** por `ATTENDANCE_INSTANCES` / `ATTENDANCE_CONVERSATIONS` (vazio =
+  nada). **Kill switch** `ATTENDANCE_ENABLED`. Começa **dry-run**
+  (`ATTENDANCE_DRY_RUN=true`): registra/loga sem enviar. **Tom** configurável
+  (`ATTENDANCE_TONE`), sem redação fixa em código.
+- Idempotente: `attendance_cases.message_id` é único.
+- Reusa o mapeamento cliente↔instância↔conversa já existente (`conversations`/
+  `messages`): não cria tabela de vínculo paralela. A tabela nova é só de casos.
+
+**Consequences / follow-ups.**
+
+- O padrão não responde sem embeddings (sem chave da OpenAI não há score para
+  confiar) — decisão deliberada.
+- O handoff (H5) deve consumir os casos `no_knowledge`; a autonomia (H6) deve
+  partir dos casos `answered` aprovados.
+- `attendance_cases` guarda o conteúdo do conhecimento usado (truncado) para
+  auditoria; revisar retenção sob LGPD.
+
 ## Multi-instance Evolution (webhook e MCP por número)
 
 **Status:** decided / implemented (2026-10-16)

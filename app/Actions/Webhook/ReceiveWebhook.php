@@ -2,12 +2,15 @@
 
 namespace App\Actions\Webhook;
 
+use App\Actions\Attendance\AnswerCustomerQuestion;
 use App\Actions\Conversations\TouchConversation;
 use App\Actions\Media\DownloadMedia;
 use App\Actions\Messages\ApplyStatusUpdate;
 use App\Actions\Messages\IndexMessage;
 use App\Actions\Messages\PersistIncomingMessage;
 use App\Contracts\Normalizer;
+use App\Enums\MessageDirection;
+use App\Enums\MessageType;
 use App\Models\Instance;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -75,6 +78,15 @@ final class ReceiveWebhook
             DownloadMedia::dispatch($message->id);
         } else {
             IndexMessage::dispatch($message->id);
+        }
+
+        // Customer text questions go through the attendance flow. It is queued
+        // so the webhook stays fast; the flow itself guards on the kill switch,
+        // the configured scope and the confidence threshold.
+        if (config('warm.attendance.enabled')
+            && $message->direction === MessageDirection::Inbound
+            && $message->type === MessageType::Text) {
+            AnswerCustomerQuestion::dispatch($message->id);
         }
 
         return response()->json(['status' => 'ok', 'duplicate' => false]);
