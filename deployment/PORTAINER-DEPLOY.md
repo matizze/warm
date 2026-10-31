@@ -39,7 +39,20 @@ Endpoints usados (API do Portainer):
 2. Cada serviço tem uma task `DesiredState=running` e `Status.State=running`.
 3. `GET https://warm.matizze.com.br/up` responde 200.
 
-Se a verificação falhar, o job falha — não considere o deploy concluído.
+Se a verificação falhar, o job falha — não considere o deploy concluído. **O
+step não faz rollback automático**: a stack permanece no digest recém-aplicado e
+o retorno é manual (seção Rollback), usando o `previous_app_image` capturado
+antes do `PUT`.
+
+Saída esperada (exemplo redigido, só os serviços do WARM):
+
+```json
+[
+  {"service":"warm_app","image":"ghcr.io/matizze/warm@sha256:<digest>","update":"completed","running_tasks":1,"task_state":"running"},
+  {"service":"warm_scheduler","image":"ghcr.io/matizze/warm@sha256:<digest>","update":"completed","running_tasks":1,"task_state":"running"},
+  {"service":"warm_worker","image":"ghcr.io/matizze/warm@sha256:<digest>","update":"completed","running_tasks":1,"task_state":"running"}
+]
+```
 
 ### Step de referência
 
@@ -99,6 +112,14 @@ done
 echo "::error::deploy verification failed for ${TARGET}"
 exit 1
 ```
+
+## Escopo
+
+O step troca somente `APP_IMAGE` (Environment variable do stack) e reenvia o
+compose vivo inalterado; o compose do Portainer é a fonte de verdade. Mudanças
+de compose (env, labels, serviços) continuam manuais, e hoje o stack vivo diverge
+de `deployment/stack.yaml` (env hardcoded, sem labels do `/mcp`) — o deploy não
+sincroniza essa diferença.
 
 ## Rollback
 
