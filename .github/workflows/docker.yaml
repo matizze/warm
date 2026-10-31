@@ -1,4 +1,5 @@
 name: Build & Push Docker (GHCR)
+
 on:
   push:
     branches: [main, develop]
@@ -6,25 +7,91 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
 
+# Um build por ref, sem cancelar o anterior: evita que um push novo
+# sobrescreva tags de um build ainda em andamento.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  docker:
+  # Pull request: só valida que a imagem compila. Sem login no GHCR e sem push.
+  build:
+    name: Build (PR, sem publicação)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set outputs
-        id: vars
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local, sem push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          build-args: |
+            WWWUSER=1000
+            WWWGROUP=1000
+          tags: warm-pr:${{ github.sha }}
+          cache-from: type=gha,scope=warm
+          cache-to: type=gha,mode=max,scope=warm
+
+      - name: Confirm local image
+        run: docker image inspect "warm-pr:${GITHUB_SHA}" >/dev/null
+
+  # Push em main/develop (e dispatch manual): publica no GHCR.
+  publish:
+    name: Publish (push)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      sha: ${{ steps.meta.outputs.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute tags
+        id: meta
         run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          echo "branch_name=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          sha="${GITHUB_SHA}"
+          tags="${REGISTRY}:${sha}"
+
+          case "${GITHUB_REF}" in
+            refs/heads/main)
+              tags="${tags}"$'\n'"${REGISTRY}:main"$'\n'"${REGISTRY}:latest"
+              ;;
+            refs/heads/develop)
+              tags="${tags}"$'\n'"${REGISTRY}:develop"
+              ;;
+          esac
+
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -39,28 +106,122 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Push
-        run: |
-          GIT_HASH="${{ steps.vars.outputs.sha_short }}"
-          BRANCH="${{ steps.vars.outputs.branch_name }}"
+      - name: Build & push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            WWWUSER=1000
+            WWWGROUP=1000
+          cache-from: type=gha,scope=warm
+          cache-to: type=gha,mode=max,scope=warm
 
-          echo "Building ${REGISTRY}:${GIT_HASH} (${BRANCH}) for linux/amd64,linux/arm64"
-
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --build-arg WWWUSER=1000 \
-            --build-arg WWWGROUP=1000 \
-            -f deployment/Dockerfile \
-            -t ${REGISTRY}:${GIT_HASH} \
-            -t ${REGISTRY}:${BRANCH} \
-            -t ${REGISTRY}:latest \
-            --push \
-            .
-
-          echo "Pushed: ${REGISTRY}:${GIT_HASH}"
-
-      - name: Deploy (webhook)
-        if: ${{ env.DEPLOY_WEBHOOK != '' }}
+      - name: Verify published digest
         env:
-          DEPLOY_WEBHOOK: ${{ secrets.DEPLOY_WEBHOOK }}
-        run: curl -X POST "${DEPLOY_WEBHOOK}"
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ steps.meta.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test -n "${DIGEST}"
+          docker buildx imagetools inspect "${REGISTRY}@${DIGEST}" >/dev/null
+          {
+            echo "### Imagem publicada"
+            echo ""
+            echo "- SHA: \`${SHA}\`"
+            echo "- Imagem: \`${REGISTRY}@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Deploy apenas em push para main, por digest imutável, após build+push.
+  deploy:
+    name: Deploy production
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://warm.matizze.com.br
+    concurrency:
+      group: warm-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    env:
+      IMAGE_REPO: ghcr.io/${{ github.repository }}
+      DIGEST: ${{ needs.publish.outputs.digest }}
+      PORTAINER_URL: ${{ vars.PORTAINER_URL }}
+      PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
+      PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
+
+    steps:
+      - name: Deploy image by digest (Portainer)
+        id: deploy
+        env:
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          : "${PORTAINER_URL:?}" "${PORTAINER_API_KEY:?}"
+          : "${PORTAINER_ENDPOINT_ID:?}" "${PORTAINER_STACK_ID:?}"
+          : "${DIGEST:?}" "${IMAGE_REPO:?}"
+
+          TARGET="${IMAGE_REPO}@${DIGEST}"
+          BASE="${PORTAINER_URL%/}/api"
+          API=(-sS --fail-with-body -H "X-API-Key: ${PORTAINER_API_KEY}")
+          HEALTH_URL="${APP_HEALTH_URL:-https://warm.matizze.com.br/up}"
+
+          stack_json="$(mktemp)"; file_json="$(mktemp)"; payload="$(mktemp)"
+          svcs_json="$(mktemp)"; tasks_json="$(mktemp)"
+          trap 'rm -f "$stack_json" "$file_json" "$payload" "$svcs_json" "$tasks_json"' EXIT
+
+          curl "${API[@]}" "${BASE}/stacks/${PORTAINER_STACK_ID}?endpointId=${PORTAINER_ENDPOINT_ID}" -o "$stack_json"
+          curl "${API[@]}" "${BASE}/stacks/${PORTAINER_STACK_ID}/file" -o "$file_json"
+
+          previous="$(jq -r '(.Env // [])[] | select(.name=="APP_IMAGE") | .value' "$stack_json" | head -1)"
+          echo "previous_app_image=${previous}" >> "${GITHUB_OUTPUT:-/dev/null}"
+
+          jq -n \
+            --arg content "$(jq -r '.StackFileContent' "$file_json")" \
+            --argjson env "$(jq -c --arg t "$TARGET" '((.Env // []) | map(select(.name!="APP_IMAGE"))) + [{name:"APP_IMAGE",value:$t}]' "$stack_json")" \
+            '{stackFileContent:$content, env:$env, prune:false}' > "$payload"
+
+          curl "${API[@]}" -X PUT -H 'Content-Type: application/json' \
+            --data-binary @"$payload" \
+            "${BASE}/stacks/${PORTAINER_STACK_ID}?endpointId=${PORTAINER_ENDPOINT_ID}" > /dev/null
+
+          for _ in $(seq 1 60); do
+            curl "${API[@]}" "${BASE}/endpoints/${PORTAINER_ENDPOINT_ID}/docker/services" -o "$svcs_json"
+            curl "${API[@]}" "${BASE}/endpoints/${PORTAINER_ENDPOINT_ID}/docker/tasks" -o "$tasks_json"
+            if jq -e -n --arg t "$TARGET" --slurpfile s "$svcs_json" --slurpfile k "$tasks_json" '
+                ["warm_app","warm_worker","warm_scheduler"] as $names
+                | ($s[0] | map(select(.Spec.Name as $n | $names | index($n)))) as $mine
+                | ($mine | length == 3)
+                  and all($mine[]; .Spec.TaskTemplate.ContainerSpec.Image == $t)
+                  and all($mine[];
+                        (.ID as $id
+                         | ($k[0] | map(select(.ServiceID==$id and .DesiredState=="running")))
+                         | length == 1 and .[0].Status.State == "running"))
+              ' > /dev/null; then
+              code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)"
+              if [ "$code" = "200" ]; then
+                echo "deployed ${TARGET}"
+                {
+                  echo "### Deploy"
+                  echo ""
+                  echo "- Imagem: \`${TARGET}\`"
+                  echo "- Anterior: \`${previous:-desconhecida}\`"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+
+          echo "::error::deploy verification failed for ${TARGET}"
+          exit 1
+
