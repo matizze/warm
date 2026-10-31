@@ -714,3 +714,11 @@ conversa é `(contact_id, instance_id)` / `(group_id, instance_id)`, então o me
 contato pode existir em números diferentes. `contacts` e `groups` são globais
 (compartilhados entre instâncias). `messages` guarda também `search_text` (busca
 por palavras) e `embedding vector(1536)` com índice HNSW (busca por significado).
+
+`clients` representa cada cliente; `client_channels` liga uma conversa a um
+cliente com um papel (`progress` = conversa interna onde o time manda o áudio do
+andamento; `client_group` = conversa do cliente, destino do resumo).
+`progress_entries` guarda o andamento transcrito (`content`), o cliente, a
+instância, a mensagem de origem (`source_message_id`, único — reprocessar não
+duplica), o autor e o horário. Áudio sem cliente identificável fica com
+`client_id` nulo e `status = pending`. Detalhes em `DECISIONS.md`.

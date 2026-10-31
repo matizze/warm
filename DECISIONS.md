@@ -1,5 +1,53 @@
 # Decisions
 
+## Identificação do cliente no registro de andamento por áudio (MTZ-222 H1)
+
+**Status:** decided / implemented (2026-10-18)
+
+**Context.** Uma pessoa do time manda um áudio no WhatsApp contando o que fez por
+um cliente; o áudio vira texto e precisa ficar ligado ao cliente certo, sem ninguém
+escrever nada. O WARM já tinha instâncias, conversas, grupos e o pipeline de
+mídia/transcrição (áudio baixado → `media.extracted_text`), mas nenhuma noção de
+"cliente" nem de como um áudio do time aponta para um.
+
+**Decision.**
+
+- O **cliente** é uma entidade própria (`clients`), identificada por um `slug`
+  URL-safe e reversível. Ela é dona das conversas que a representam.
+- A convenção que identifica o cliente é a **conversa em que o áudio chegou**, e
+  não um marcador na mensagem (o objetivo é "sem escrever nada"). Cada conversa é
+  ligada a no máximo um cliente por uma linha em **`client_channels`**
+  (`conversation_id` único), com um papel: `progress` (conversa interna dedicada
+  onde o time manda o áudio do andamento) ou `client_group` (a conversa do próprio
+  cliente, destino do resumo diário da História 2).
+- Só conversas declaradas como canal `progress` geram lançamentos. Tráfego normal
+  do WhatsApp nunca vira andamento — evita poluir a base.
+- Um "lançamento de andamento" (`progress_entries`) guarda o texto transcrito
+  (`content`), o cliente (`client_id`, nulo quando não identificado), a conversa,
+  a instância, a mensagem de origem, o autor e o horário (`occurred_at`), além de
+  status `recorded`/`pending`.
+- Um canal `progress` **sem** cliente (ou com cliente removido) registra o áudio
+  como **pendente** — guardado para triagem, nunca descartado em silêncio.
+- **Idempotência** por `source_message_id` (índice único): reprocessar o mesmo
+  áudio devolve o lançamento existente, não cria outro.
+
+**Reversibilidade.** A ligação é dado, não código: desativar (`active=false`) ou
+apagar a linha de `client_channels` faz a conversa deixar de gerar lançamentos; o
+histórico já gravado permanece. Trocar o cliente de uma conversa é reescrever
+`client_id` naquela linha.
+
+**Consequences / follow-ups.**
+
+- O modelo é a base compartilhada das demais histórias: a MTZ-B (responder dúvida)
+  resolve cliente↔instância pela mesma `client_channels` (papel `client_group`) e
+  a História 2 lê `progress_entries` por cliente e dia. Não criar migração
+  sobreposta de cliente/conversa sem alinhar com esta issue.
+- `occurred_at` usa o `created_at` da mensagem (momento da ingestão): o normalizer
+  do Evolution recebe o timestamp do provedor, mas a ingestão não o persiste ainda.
+  Se o horário exato do áudio importar, passar a gravá-lo na mensagem.
+- Apenas áudios (`MessageType::Audio`) viram andamento nesta versão; texto e outros
+  tipos ficam de fora por ora.
+
 ## Multi-instance Evolution (webhook e MCP por número)
 
 **Status:** decided / implemented (2026-10-16)
