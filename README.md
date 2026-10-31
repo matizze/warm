@@ -565,49 +565,19 @@ pull request só valida o build, e deploy só acontece em `push` para a `main`.
   nunca por tag móvel, e verifica no final que o digest em execução na stack é o
   mesmo que foi publicado.
 
-**Secrets do environment `production`** (Settings → Environments → `production`;
-não crie como secret de repositório):
-
-| Secret | Uso |
-|---|---|
-| `DEPLOY_WEBHOOK` | URL que atualiza o `APP_IMAGE` da stack `warm` e faz o redeploy. |
-| `DEPLOY_TOKEN` | Token enviado como `Authorization: Bearer` ao webhook e ao endpoint de verificação. |
-| `DEPLOY_STATUS_URL` | `GET` que retorna o digest da imagem em execução na stack. |
-
-Contrato usado pelo workflow (URLs e token nunca são ecoados nos logs):
-
-```jsonc
-// POST DEPLOY_WEBHOOK
-{
-  "image": "ghcr.io/matizze/warm@sha256:<digest>",
-  "sha": "<sha-completo-do-commit>",
-  "digest": "sha256:<digest>"
-}
-
-// GET DEPLOY_STATUS_URL
-{ "digest": "sha256:<digest>", "image": "ghcr.io/matizze/warm@sha256:<digest>" }
-```
-
-O deploy só é considerado concluído quando o `digest` retornado pelo endpoint
-de status é igual ao digest publicado pelo job. Se não convergir, o job falha.
+O contrato de deploy (Environment, secret `PORTAINER_API_KEY`, variables
+`PORTAINER_URL`/`PORTAINER_ENDPOINT_ID`/`PORTAINER_STACK_ID`, chamadas à API do
+Portainer e verificação da imagem em execução) está em
+[`deployment/PORTAINER-DEPLOY.md`](deployment/PORTAINER-DEPLOY.md). O job do
+workflow segue aquele documento; não duplique os valores aqui.
 
 #### Deploy manual e rollback
 
-O deploy normal é automático ao mergear na `main`. Para operar manualmente
-(ex.: rollback ou repin), atualize o `APP_IMAGE` da stack `warm` no Portainer
-para o digest desejado e faça o redeploy:
-
-```text
-APP_IMAGE=ghcr.io/matizze/warm@sha256:<digest>
-```
-
-- **Rollback:** aponte `APP_IMAGE` de volta para o digest anterior conhecido e
-  redeploy da stack. Para mudanças que envolveram migração de schema, siga
-  também a seção [Rollback de versão](#rollback-de-versão) abaixo.
-- **Nunca** use `:latest`, `:main` ou `:develop` em produção: elas mudam sem
-  aviso e não permitem provar qual commit está rodando.
-- O digest de cada build fica no resumo do job de publicação (Actions → run →
-  Summary) e na tag `:<sha-completo>` (`docker buildx imagetools inspect`).
+O deploy normal é automático ao mergear na `main`. Para deploy manual, rollback
+ou repin, siga [`deployment/PORTAINER-DEPLOY.md`](deployment/PORTAINER-DEPLOY.md):
+use sempre `APP_IMAGE=ghcr.io/matizze/warm@sha256:<digest>`, nunca `:latest`,
+`:main` ou `:develop`. Rollback que envolva migração de schema segue também a
+seção [Rollback de versão](#rollback-de-versão) abaixo.
 
 ---
 

@@ -152,58 +152,76 @@ jobs:
       contents: read
 
     env:
-      IMAGE: ghcr.io/${{ github.repository }}@${{ needs.publish.outputs.digest }}
-      IMAGE_SHA: ${{ needs.publish.outputs.sha }}
-      IMAGE_DIGEST: ${{ needs.publish.outputs.digest }}
+      IMAGE_REPO: ghcr.io/${{ github.repository }}
+      DIGEST: ${{ needs.publish.outputs.digest }}
+      PORTAINER_URL: ${{ vars.PORTAINER_URL }}
+      PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
+      PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
 
     steps:
-      - name: Deploy image by digest
+      - name: Deploy image by digest (Portainer)
+        id: deploy
         env:
-          DEPLOY_WEBHOOK: ${{ secrets.DEPLOY_WEBHOOK }}
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
         run: |
           set -euo pipefail
-          : "${DEPLOY_WEBHOOK:?secret DEPLOY_WEBHOOK obrigatório no environment production}"
-          : "${DEPLOY_TOKEN:?secret DEPLOY_TOKEN obrigatório no environment production}"
-          : "${IMAGE_DIGEST:?publish não expôs digest}"
 
-          payload="$(jq -cn \
-            --arg image "$IMAGE" \
-            --arg sha "$IMAGE_SHA" \
-            --arg digest "$IMAGE_DIGEST" \
-            '{image:$image,sha:$sha,digest:$digest}')"
+          : "${PORTAINER_URL:?}" "${PORTAINER_API_KEY:?}"
+          : "${PORTAINER_ENDPOINT_ID:?}" "${PORTAINER_STACK_ID:?}"
+          : "${DIGEST:?}" "${IMAGE_REPO:?}"
 
-          status="$(curl -sS -o /tmp/deploy-response.json -w '%{http_code}' \
-            --fail-with-body \
-            -X POST "$DEPLOY_WEBHOOK" \
-            -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
-            -H 'Content-Type: application/json' \
-            --data "$payload")"
+          TARGET="${IMAGE_REPO}@${DIGEST}"
+          BASE="${PORTAINER_URL%/}/api"
+          API=(-sS --fail-with-body -H "X-API-Key: ${PORTAINER_API_KEY}")
+          HEALTH_URL="${APP_HEALTH_URL:-https://warm.matizze.com.br/up}"
 
-          echo "deploy webhook HTTP ${status}"
-          cat /tmp/deploy-response.json
+          stack_json="$(mktemp)"; file_json="$(mktemp)"; payload="$(mktemp)"
+          svcs_json="$(mktemp)"; tasks_json="$(mktemp)"
+          trap 'rm -f "$stack_json" "$file_json" "$payload" "$svcs_json" "$tasks_json"' EXIT
 
-      - name: Verify running image matches digest
-        env:
-          DEPLOY_STATUS_URL: ${{ secrets.DEPLOY_STATUS_URL }}
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-        run: |
-          set -euo pipefail
-          : "${DEPLOY_STATUS_URL:?secret DEPLOY_STATUS_URL obrigatório no environment production}"
+          curl "${API[@]}" "${BASE}/stacks/${PORTAINER_STACK_ID}?endpointId=${PORTAINER_ENDPOINT_ID}" -o "$stack_json"
+          curl "${API[@]}" "${BASE}/stacks/${PORTAINER_STACK_ID}/file" -o "$file_json"
 
-          for attempt in $(seq 1 30); do
-            body="$(curl -fsS "$DEPLOY_STATUS_URL" \
-              -H "Authorization: Bearer ${DEPLOY_TOKEN}" || true)"
-            running="$(printf '%s' "$body" | jq -r '.digest // empty' 2>/dev/null || true)"
+          previous="$(jq -r '(.Env // [])[] | select(.name=="APP_IMAGE") | .value' "$stack_json" | head -1)"
+          echo "previous_app_image=${previous}" >> "${GITHUB_OUTPUT:-/dev/null}"
 
-            if [ "${running}" = "${IMAGE_DIGEST}" ]; then
-              echo "OK: imagem em execução é ${running}"
-              exit 0
+          jq -n \
+            --arg content "$(jq -r '.StackFileContent' "$file_json")" \
+            --argjson env "$(jq -c --arg t "$TARGET" '((.Env // []) | map(select(.name!="APP_IMAGE"))) + [{name:"APP_IMAGE",value:$t}]' "$stack_json")" \
+            '{stackFileContent:$content, env:$env, prune:false}' > "$payload"
+
+          curl "${API[@]}" -X PUT -H 'Content-Type: application/json' \
+            --data-binary @"$payload" \
+            "${BASE}/stacks/${PORTAINER_STACK_ID}?endpointId=${PORTAINER_ENDPOINT_ID}" > /dev/null
+
+          for _ in $(seq 1 60); do
+            curl "${API[@]}" "${BASE}/endpoints/${PORTAINER_ENDPOINT_ID}/docker/services" -o "$svcs_json"
+            curl "${API[@]}" "${BASE}/endpoints/${PORTAINER_ENDPOINT_ID}/docker/tasks" -o "$tasks_json"
+            if jq -e -n --arg t "$TARGET" --slurpfile s "$svcs_json" --slurpfile k "$tasks_json" '
+                ["warm_app","warm_worker","warm_scheduler"] as $names
+                | ($s[0] | map(select(.Spec.Name as $n | $names | index($n)))) as $mine
+                | ($mine | length == 3)
+                  and all($mine[]; .Spec.TaskTemplate.ContainerSpec.Image == $t)
+                  and all($mine[];
+                        (.ID as $id
+                         | ($k[0] | map(select(.ServiceID==$id and .DesiredState=="running")))
+                         | length == 1 and .[0].Status.State == "running"))
+              ' > /dev/null; then
+              code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)"
+              if [ "$code" = "200" ]; then
+                echo "deployed ${TARGET}"
+                {
+                  echo "### Deploy"
+                  echo ""
+                  echo "- Imagem: \`${TARGET}\`"
+                  echo "- Anterior: \`${previous:-desconhecida}\`"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
             fi
-
-            echo "tentativa ${attempt}: em execução '${running}', esperado '${IMAGE_DIGEST}'"
-            sleep 10
+            sleep 5
           done
 
-          echo "::error::stack não convergiu para ${IMAGE_DIGEST} após o deploy"
+          echo "::error::deploy verification failed for ${TARGET}"
           exit 1
+
