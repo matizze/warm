@@ -28,7 +28,13 @@ final class MediaStorage
 
     public function get(string $key): string
     {
-        return $this->disk()->get($key);
+        $disk = $this->disk();
+
+        if (! $disk->exists($key)) {
+            throw new RuntimeException("Mídia não encontrada no storage: {$key}");
+        }
+
+        return $disk->get($key);
     }
 
     public function getSignedUrl(string $key): string

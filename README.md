@@ -566,6 +566,16 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
   Se você mudar `EMBEDDING_DIMENSIONS`, o comando **avisa e para**; ajustar o
   banco é uma decisão separada e manual (proposital). Sem a chave da OpenAI, ele
   faz a indexação apenas por palavras.
+- **Reprocessar mídia já baixada** (transcrição/descrição/PDF que falharam ou
+  foram puladas, por exemplo por falta de `OPENAI_API_KEY` na época):
+  ```bash
+  php artisan warm:media:reprocess --status=failed --dry-run  # só simula
+  php artisan warm:media:reprocess --status=failed            # reprocessa
+  ```
+  Filtros: `--type=`, `--status=failed|skipped|done`, `--from=`, `--to=`,
+  `--messages=<id,id>`, `--limit=`. Exige `PROCESSING_ENABLED=true`, reindexa a
+  mensagem de cada mídia e segue o lote mesmo quando um item falha (mídia sem
+  arquivo no storage conta como falha).
 - **Backups**: faça cópia do banco de dados e do bucket de mídias regularmente.
 - **Logs**: ficam em `storage/logs/`. Acompanhe com `php artisan pail`.
 - **Atualizações**: rode `composer install`, `php artisan migrate --force` e
