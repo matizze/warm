@@ -9,15 +9,29 @@ use App\Contracts\WhatsAppProvider;
 use App\Integrations\Evolution\EvolutionNormalizer;
 use App\Integrations\Evolution\EvolutionProvider;
 use App\Integrations\OpenAI\OpenAIEmbeddingProvider;
+use App\Models\Instance;
 use App\Processing\ProcessingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use ReflectionProperty;
+use RuntimeException;
 use Tests\TestCase;
 
 class AdapterWiringTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_whatsapp_provider_resolves_to_evolution_adapter(): void
     {
         $this->assertInstanceOf(EvolutionProvider::class, app(WhatsAppProvider::class));
+    }
+
+    public function test_whatsapp_provider_requires_a_default_instance(): void
+    {
+        Instance::query()->update(['is_default' => false]);
+
+        $this->expectException(RuntimeException::class);
+
+        app(WhatsAppProvider::class);
     }
 
     public function test_normalizer_resolves_to_evolution_adapter(): void

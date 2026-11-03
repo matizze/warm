@@ -7,6 +7,7 @@ use App\Actions\Messages\IndexMessage;
 use App\Contracts\Normalizer;
 use App\Data\IncomingMessage;
 use App\Data\StatusUpdate;
+use App\Models\Instance;
 use App\Models\Message;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -55,13 +56,13 @@ class WebhookTest extends TestCase
         $this->postJson('/webhook', [])->assertStatus(401);
     }
 
-    public function test_empty_token_is_allowed_in_testing_environment(): void
+    public function test_default_instance_without_a_token_rejects_every_request(): void
     {
-        config(['warm.webhook_token' => '']);
+        Instance::default()->update(['webhook_token' => '']);
 
-        $this->postJson('/webhook', ['event' => 'connection.update', 'data' => []])
-            ->assertOk()
-            ->assertJson(['status' => 'ignored']);
+        $this->withHeaders(['x-webhook-token' => ''])
+            ->postJson('/webhook', ['event' => 'connection.update', 'data' => []])
+            ->assertStatus(401);
     }
 
     public function test_ignores_unsupported_event(): void

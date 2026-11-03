@@ -34,6 +34,10 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="WHATSAPP_PROVIDER" value="evolution"/>
+        <!-- Seed the default instance through the legacy upgrade path of the instances migration. -->
+        <env name="EVOLUTION_INSTANCE_ID" value="instance1"/>
+        <env name="EVOLUTION_URL" value="http://localhost:8080"/>
+        <env name="EVOLUTION_API_KEY" value=""/>
         <env name="WEBHOOK_TOKEN" value="test-token"/>
         <env name="MCP_TOKEN" value="test-mcp-token"/>
         <env name="PROCESSING_ENABLED" value="false"/>
