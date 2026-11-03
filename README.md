@@ -149,7 +149,9 @@ php artisan migrate
 ### 6. Preencher as chaves no `.env`
 
 Veja a seção [Configuração](#configuração-arquivo-env) abaixo. O mínimo é:
-banco, storage, Evolution (URL, chave, instância) e `WEBHOOK_TOKEN`.
+banco e storage. As credenciais do WhatsApp **não** vão no `.env`: cada número é
+cadastrado no banco com `php artisan warm:instance:create` (veja
+[Conectar o WhatsApp](#conectar-o-whatsapp-evolution)).
 
 Pronto. Agora siga para **Conectar o WhatsApp** e **Ligar o WARM**.
 
@@ -193,16 +195,24 @@ O `.env` tem blocos. Abaixo, o que cada variável faz em linguagem simples.
 | Variável | O que é |
 |---|---|
 | `WHATSAPP_PROVIDER` | qual provedor usar. Hoje: `evolution`. |
-| `EVOLUTION_URL` | endereço do seu servidor Evolution. |
-| `EVOLUTION_API_KEY` | chave da sua conta Evolution. |
-| `EVOLUTION_INSTANCE_ID` | nome da instância (o número/conta). **Só é usado na primeira migração**, para cadastrar a instância default na tabela `instances`. Depois disso, cada número é cadastrado na tabela — veja [Múltiplas instâncias](#múltiplas-instâncias-vários-números). Use um **slug** (sem espaços): ex. `henriquecosta`. |
 
-### Segurança do webhook e admin
+Endereço e chave do Evolution, e as senhas do webhook e do MCP, ficam **por
+número no banco** (tabela `instances`, criptografadas com o `APP_KEY`) — veja
+[Múltiplas instâncias](#múltiplas-instâncias-vários-números).
+
+> **Atualizando uma instalação antiga?** Se o seu `.env` ainda tem
+> `EVOLUTION_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_ID`, `WEBHOOK_TOKEN` e
+> `MCP_TOKEN`, mantenha-os até rodar o `php artisan migrate`: a migração os importa
+> como a instância default. Depois disso o WARM não lê mais essas variáveis e elas
+> podem ser apagadas.
+
+### Segurança do admin
 | Variável | O que é |
 |---|---|
-| `WEBHOOK_TOKEN` | uma senha que o Evolution usa para provar que o aviso é legítimo. Sem ela configurada, só passa em ambiente de teste. **Use um valor aleatório longo em produção.** É o token das rotas legadas e o token inicial (default) na primeira migração. |
 | `ADMIN_TOKEN` | senha para disparar a reindexação por HTTP. Se vazio, esse endereço fica desativado. |
-| `MCP_TOKEN` | bearer da rota MCP **legada** (`POST /mcp`). Vazio desativa essa rota (404). Cada instância tem o seu próprio `mcp_token` na tabela `instances`. |
+
+> Trocar o `APP_KEY` torna ilegíveis as credenciais guardadas em `instances`.
+> Se precisar trocá-lo, recadastre as instâncias depois.
 
 ### Áudio, imagem e PDF (processamento por IA)
 | Variável | O que é |
@@ -233,17 +243,25 @@ O `.env` tem blocos. Abaixo, o que cada variável faz em linguagem simples.
 
 1. No painel do Evolution, crie/abra a **instância** do número que o WARM vai
    usar e **conecte o WhatsApp** (leitura do QR Code).
-2. Copie o **endereço do servidor**, a **chave de API** e o **nome da instância**
-   e coloque no `.env` (`EVOLUTION_URL`, `EVOLUTION_API_KEY`,
-   `EVOLUTION_INSTANCE_ID`). Esse nome será o `instance_id` da instância — nomeie
-   o número como um **slug** (sem espaços nem acentos), ex. `henriquecosta`.
-3. Gere um `WEBHOOK_TOKEN` aleatório:
+2. Cadastre o número no WARM com o **endereço do servidor** e o **nome da
+   instância** no Evolution (a **chave de API** é pedida sem aparecer na tela).
+   Esse nome será o `instance_id` — nomeie o número como um **slug** (sem espaços
+   nem acentos), ex. `henriquecosta`. Use `--default` no primeiro número:
 
    ```bash
-   php -r "echo bin2hex(random_bytes(16)).PHP_EOL;"
+   php artisan warm:instance:create henriquecosta --url=https://SEU-EVOLUTION --default
    ```
 
-   Copie o resultado para `WEBHOOK_TOKEN` no `.env`.
+   O comando gera as senhas do webhook e do MCP e mostra as URLs prontas. Para
+   vê-las de novo: `php artisan warm:instance:tokens henriquecosta`.
+
+Outros comandos úteis:
+
+| Comando | O que faz |
+|---|---|
+| `php artisan warm:instance:list` | lista os números cadastrados (sem mostrar senhas). |
+| `php artisan warm:instance:tokens {id}` | mostra as URLs e senhas de um número. |
+| `php artisan warm:instance:rotate-token {id}` | troca as senhas (use `--webhook` ou `--mcp` para trocar só uma). A senha antiga para de funcionar na hora. |
 
 ### Apontar o webhook para o WARM
 
@@ -289,7 +307,7 @@ cloudflared tunnel --url http://localhost:8000
 ```
 
 O túnel mostra um endereço tipo `https://algo-aleatorio.trycloudflare.com`. Use
-esse endereço no `url` do webhook acima (com `/webhook?token=...`). Esse link
+esse endereço no `url` do webhook acima (com `/instance/NOME_DA_INSTANCIA/webhook?token=...`). Esse link
 muda cada vez que o túnel reinicia — reaponte o webhook.
 
 > O túnel só serve para o **webhook**. A conexão da IA (MCP) **não** precisa dele.
@@ -349,7 +367,7 @@ POST https://warm.suaempresa.com/instance/{instance_id}/mcp
 Authorization: Bearer MCP_TOKEN_DA_INSTANCIA
 ```
 
-O bearer é o `mcp_token` da instância na tabela `instances`. As ferramentas de
+O bearer é o `mcp_token` da instância (veja `php artisan warm:instance:tokens {id}`). As ferramentas de
 **mensagem** (`message.search`, `conversation.search`, `message.send`) operam no
 contexto daquela instância: só enxergam e enviam pelo número correspondente.
 
@@ -361,7 +379,7 @@ Escopo do que **não** é por instância (igual ao registrado em `DECISIONS`):
   um id vindo de uma busca já escopada (`message.search`).
 
 É assim que um workspace (ex.: Multica) cadastra uma entrada MCP por número. A
-rota legada `POST /mcp` usa o `MCP_TOKEN` do `.env` e atende a instância default.
+rota legada `POST /mcp` atende a instância default, com o `mcp_token` dela.
 
 Depois de conectado, é só conversar normalmente com a IA.
 
@@ -412,7 +430,7 @@ O WARM atende **vários números de WhatsApp** na mesma instalação. Cada núme
 uma **instância**: um registro na tabela `instances` com as credenciais do
 Evolution e os tokens próprios daquele número.
 
-### Cadastro das instâncias (tabela, não só `.env`)
+### Cadastro das instâncias (tabela `instances`)
 
 | Campo | O que é |
 |---|---|
@@ -420,15 +438,19 @@ Evolution e os tokens próprios daquele número.
 | `evolution_url` | endereço do servidor Evolution daquele número. |
 | `api_key` | chave de API do Evolution. |
 | `webhook_token` | token que valida o webhook **daquela** instância. |
-| `mcp_token` | bearer que valida o MCP **daquela** instância. Vazio desativa o MCP dela (401). |
+| `mcp_token` | bearer que valida o MCP **daquela** instância. Vazio rejeita todo acesso MCP a ela (401). |
 | `is_default` | a instância usada pelas rotas legadas `/webhook` e `/mcp`. |
 | `active` | instância inativa responde **404** (nunca 403). |
+
+`api_key`, `webhook_token` e `mcp_token` ficam **criptografados** com o `APP_KEY`.
+Cadastre e troque senhas com os comandos `warm:instance:*` (veja
+[Conectar o WhatsApp](#conectar-o-whatsapp-evolution)), não editando a tabela à mão.
 
 Na primeira migração, a instância que estava no `.env`
 (`EVOLUTION_INSTANCE_ID`) é cadastrada automaticamente como **default**, e
 conversas/mensagens antigas são ligadas a ela — o upgrade não exige ação do
-operador. Dali em diante, números novos são cadastrados direto na tabela
-`instances`.
+operador. Dali em diante, números novos são cadastrados com
+`php artisan warm:instance:create`.
 
 Regra de isolamento: `conversations` e `messages` guardam `instance_id`, e a
 unicidade de conversa é `(contact_id, instance_id)` / `(group_id, instance_id)` —
@@ -481,8 +503,10 @@ Authorization: Bearer MCP_TOKEN_DA_INSTANCIA
 ### Rotas legadas (número único)
 
 `POST /webhook` e `POST /mcp` continuam existindo e atendem a instância
-**default** (autenticadas pelos tokens de ambiente `WEBHOOK_TOKEN`/`MCP_TOKEN`).
-Servem instalações de número único e ficam disponíveis durante a transição.
+**default**, autenticadas pelos tokens **dela** no banco (os mesmos de
+`/instance/{default}/webhook` e `/instance/{default}/mcp`). Sem instância default,
+respondem 404. Servem instalações de número único e ficam disponíveis durante a
+transição.
 
 ---
 
@@ -547,7 +571,8 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
 
 - **Credenciais** (banco, S3, Evolution, OpenAI) ficam só no `.env`/secret manager
   — nunca no código, nos logs, nas respostas da IA ou em documentos.
-- **Use `WEBHOOK_TOKEN` forte**; ele prova que o aviso veio do seu Evolution.
+- **Senhas do webhook/MCP** são geradas pelo `warm:instance:create` e ficam
+  criptografadas no banco; troque-as com `warm:instance:rotate-token` se vazarem.
 - **HTTPS sempre** em produção.
 - **Rotacione chaves** periodicamente e imediatamente se vazarem.
 - **LGPD**: o WARM guarda dados pessoais de conversas. Restrinja o acesso,
@@ -601,9 +626,10 @@ Passos (em janela de manutenção, com a ingestão parada):
    as duas migrações; rodar o `migrate:rollback` pela imagem antiga reverteria o
    batch errado. Dentro de um container da imagem atual:
    ```bash
-   php artisan migrate:rollback --step=2 --force
+   php artisan migrate:rollback --step=3 --force
    ```
-   `--step=2` reverte exatamente as duas migrações de multi-instância — confirme
+   `--step=3` reverte exatamente as três migrações de multi-instância (incluindo
+   a que criptografa as credenciais) — confirme
    em `php artisan migrate:status` que elas são o último batch.
    Alternativa revisável (mesmo efeito, com dedup e limpeza do `migrations`):
    ```bash
@@ -616,7 +642,8 @@ Passos (em janela de manutenção, com a ingestão parada):
    (o digest pré-multi-instância usado no rollout foi
    `main@sha256:e5fa1d15…`) e redeploy da stack.
 5. **Validar:** `/up` (ou `/health`) responde 200; a rota legada `/webhook`
-   autentica com o `WEBHOOK_TOKEN` do `.env`; e uma mensagem de entrada é
+   autentica com o `WEBHOOK_TOKEN` do `.env` (a imagem antiga volta a lê-lo, então
+   ele precisa estar de volta na stack); e uma mensagem de entrada é
    persistida sem erro (a imagem antiga insere sem `instance_id`).
 
 > **Ordem importa.** Pare a ingestão, reverta o schema pela imagem nova e só então
@@ -629,7 +656,7 @@ Passos (em janela de manutenção, com a ingestão parada):
 | Sintoma | Causa provável | Solução |
 |---|---|---|
 | Mensagens não chegam | webhook não aponta para o WARM | reconfigure o webhook no Evolution (endereço pode ter mudado, ex.: túnel reiniciado). |
-| Webhook responde 401 | token da URL diferente do da instância (ou do `WEBHOOK_TOKEN`, na rota legada) | use o `webhook_token` da instância certa; na rota legada, alinhe com o `.env`. |
+| Webhook responde 401 | token da URL diferente do da instância (na rota legada, da instância default) | confira com `php artisan warm:instance:tokens {id}`. |
 | Webhook/MCP responde 404 | `instance_id` do caminho não existe ou está inativa | confira o `instance_id` na tabela `instances` e o campo `active`. |
 | Mídia não é baixada | worker da fila desligado | rode `php artisan queue:work`. |
 | Erro "Vite manifest" | front-end do Laravel não compilado | rode `npm install && npm run build` (ou ignore se não usa o front). |
@@ -655,8 +682,8 @@ Para quem for mexer no código.
 |---|---|---|
 | POST | `/instance/{id}/webhook` | recebe eventos da instância `{id}` (auth: `x-webhook-token` ou `?token=` do `webhook_token` da instância; 401 sem/errado, 404 inexistente/inativa). |
 | POST | `/instance/{id}/mcp` | MCP HTTP no contexto da instância `{id}` (auth: `Authorization: Bearer <mcp_token>`; 401/404 como acima). |
-| POST | `/webhook` | rota legada → instância default (auth: `WEBHOOK_TOKEN`). |
-| POST | `/mcp` | rota legada → instância default (auth: `MCP_TOKEN`; 404 se vazio). |
+| POST | `/webhook` | rota legada → instância default (auth: `webhook_token` dela; 404 sem default). |
+| POST | `/mcp` | rota legada → instância default (auth: `mcp_token` dela; 404 sem default). |
 | GET | `/health` | `{"status":"ok"}`. |
 | POST | `/admin/reindex` | dispara a reindexação (auth: `x-admin-token`; 404 se `ADMIN_TOKEN` vazio). |
 

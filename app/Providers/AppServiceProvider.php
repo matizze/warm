@@ -18,21 +18,16 @@ use App\Processing\ProcessingService;
 use Illuminate\Support\ServiceProvider;
 use Lorisleiva\Actions\Facades\Actions;
 use RuntimeException;
-use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->app->singleton(WhatsAppProvider::class, function () {
-            // The default instance is the continuation of the former
-            // single-instance (env-driven) setup. Until the instances table is
-            // migrated (or if the database is unreachable) fall back to env.
-            try {
-                $config = Instance::default()?->providerConfig() ?? config('warm.evolution');
-            } catch (Throwable) {
-                $config = config('warm.evolution');
-            }
+            // The default instance is the only source of provider credentials;
+            // there is no env fallback.
+            $config = Instance::default()?->providerConfig()
+                ?? throw new RuntimeException('No default instance configured. Create one with `php artisan warm:instance:create --default`.');
 
             return match ($provider = config('warm.provider')) {
                 'evolution' => new EvolutionProvider($config),
