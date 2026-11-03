@@ -59,8 +59,22 @@ jobs:
 
           echo "Pushed: ${REGISTRY}:${GIT_HASH}"
 
-      - name: Deploy (webhook)
-        if: ${{ env.DEPLOY_WEBHOOK != '' }}
+      # Production deploys only from main. DEPLOY_WEBHOOK holds one Portainer
+      # service webhook URL per line (app, worker, scheduler); `?tag=` repoints
+      # each service to the image just pushed.
+      - name: Deploy (Portainer webhooks)
+        if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         env:
           DEPLOY_WEBHOOK: ${{ secrets.DEPLOY_WEBHOOK }}
-        run: curl -X POST "${DEPLOY_WEBHOOK}"
+          GIT_HASH: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          if [ -z "${DEPLOY_WEBHOOK}" ]; then
+            echo "DEPLOY_WEBHOOK not set, skipping deploy."
+            exit 0
+          fi
+
+          for url in ${DEPLOY_WEBHOOK}; do
+            curl -fsS -X POST "${url}?tag=${GIT_HASH}"
+          done
+
+          echo "Deploy triggered for ${GIT_HASH}"
