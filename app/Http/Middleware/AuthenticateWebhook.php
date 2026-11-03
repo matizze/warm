@@ -7,40 +7,22 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Checks the webhook token (header or `?token=`) against the resolved
+ * instance's `webhook_token`. Must run after `instance.resolve`. An instance
+ * without a token rejects every request.
+ */
 class AuthenticateWebhook
 {
     public function handle(Request $request, Closure $next): Response
     {
+        /** @var Instance $instance */
         $instance = $request->attributes->get('warm.instance');
 
-        // Instance-scoped route: the token belongs to that instance and an
-        // empty or wrong token is always rejected.
-        if ($instance instanceof Instance) {
-            $expected = (string) $instance->webhook_token;
-            $provided = $request->header('x-webhook-token') ?? $request->query('token');
-
-            if ($expected === '' || ! is_string($provided) || ! hash_equals($expected, $provided)) {
-                return response()->json(['status' => 'unauthorized'], 401);
-            }
-
-            return $next($request);
-        }
-
-        $expected = (string) config('warm.webhook_token');
-
-        // A missing token is only tolerable in local/testing; anywhere else it
-        // means misconfiguration, so every request is rejected.
-        if ($expected === '') {
-            if (app()->environment(['local', 'testing'])) {
-                return $next($request);
-            }
-
-            return response()->json(['status' => 'unauthorized'], 401);
-        }
-
+        $expected = (string) $instance->webhook_token;
         $provided = $request->header('x-webhook-token') ?? $request->query('token');
 
-        if (! is_string($provided) || ! hash_equals($expected, $provided)) {
+        if ($expected === '' || ! is_string($provided) || ! hash_equals($expected, $provided)) {
             return response()->json(['status' => 'unauthorized'], 401);
         }
 

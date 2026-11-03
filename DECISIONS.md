@@ -1,5 +1,38 @@
 # Decisions
 
+## Credenciais de instância só no banco
+
+**Status:** decided / implemented (2026-11-03)
+
+**Context.** Depois do multi-instância, a instância default tinha **duas** fontes
+de senha: as rotas legadas (`/webhook`, `/mcp`) conferiam `WEBHOOK_TOKEN`/
+`MCP_TOKEN` do env, e as rotas `/instance/{id}/...` conferiam a tabela
+`instances`. Elas só começavam iguais porque a migração copiava o env; trocar uma
+não trocava a outra. As credenciais também ficavam em texto puro.
+
+**Decision.**
+
+- A tabela `instances` é a **única** fonte de `evolution_url`, `api_key`,
+  `webhook_token` e `mcp_token`. As rotas legadas resolvem a instância default
+  (`instance.resolve`) e conferem os tokens dela; sem default → 404.
+- `config/warm.php` não tem mais `webhook_token`, `mcp_token` nem `evolution.*`,
+  e o provider do WhatsApp não cai mais para o env (sem default → exceção).
+- `api_key`, `webhook_token` e `mcp_token` usam o cast `encrypted` (APP_KEY);
+  as colunas viraram `text` (migração `2026_11_03_162905`).
+- Cadastro e rotação por comando: `warm:instance:create`, `warm:instance:list`,
+  `warm:instance:tokens`, `warm:instance:rotate-token`.
+- A migração `2026_10_16_120000` segue importando `EVOLUTION_*`/`WEBHOOK_TOKEN`/
+  `MCP_TOKEN` do env (via `env()`), só como caminho de upgrade de instalações
+  pré-multi-instância; sem `EVOLUTION_INSTANCE_ID` ela não cria default.
+
+**Consequences.**
+
+- Trocar o `APP_KEY` torna as credenciais ilegíveis; é preciso recadastrar.
+- Rollback para uma imagem anterior a esta decisão exige reverter a migração de
+  criptografia antes (`php artisan migrate:rollback --step=1`), senão a imagem
+  antiga compara tokens com o texto cifrado e responde 401; e as variáveis de env
+  removidas precisam voltar à stack.
+
 ## Multi-instance Evolution (webhook e MCP por número)
 
 **Status:** decided / implemented (2026-10-16)
@@ -19,7 +52,8 @@ pessoal) na mesma stack, o WARM passou a suportar múltiplas instâncias.
   instância inexistente/inativa → 404). `conversations` e `messages` guardam
   `instance_id` e a resposta sai pela instância da conversa.
 - As rotas legadas `POST /webhook` e `POST /mcp` roteiam para a instância
-  **default** (auth por `WEBHOOK_TOKEN`/`MCP_TOKEN` do env).
+  **default** e autenticam com os tokens **dela** no banco (ver decisão
+  "Credenciais só no banco").
 - A primeira migração faz **backfill** da instância do env como default, ligando
   os dados existentes a ela sem ação do operador.
 - O `instance_id` é um **slug URL-safe** (norma: sem espaços/acentos/maiúsculas;
@@ -48,7 +82,7 @@ pessoal) na mesma stack, o WARM passou a suportar múltiplas instâncias.
 `messages.instance_id` são `NOT NULL` sem default, então a imagem antiga quebra a
 ingestão ao inserir sem a coluna. O rollback do schema é obrigatório e roda
 **antes** de a imagem antiga atender, pela imagem **nova** (que conhece as
-migrações): `php artisan migrate:rollback --step=2 --force`, ou a alternativa
+migrações): `php artisan migrate:rollback --step=3 --force`, ou a alternativa
 revisável `deployment/rollback-multi-instance.sql` (deduplica conversas e limpa o
 `migrations`). Ver README → Manutenção do dia a dia → Rollback de versão.
 

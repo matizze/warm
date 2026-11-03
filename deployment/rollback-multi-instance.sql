@@ -4,7 +4,8 @@
 -- Reverte o schema das migrações:
 --   2026_10_16_120000_create_instances_table
 --   2026_10_16_120001_add_instance_id_to_conversations_and_messages
--- Equivale ao `php artisan migrate:rollback --step=2`, mas de forma revisável
+--   2026_11_03_162905_encrypt_instance_credentials
+-- Equivale ao `php artisan migrate:rollback --step=3`, mas de forma revisável
 -- e tolerante a conversas duplicadas entre instâncias (o `down` aborta no
 -- índice único quando o mesmo contato/grupo existe em 2+ instâncias).
 --
@@ -14,7 +15,7 @@
 --   * Deduplica conversas: por contato/grupo, mantém a conversa da instância
 --     default (empate -> menor id) e MOVE as mensagens das demais para ela
 --     (sem perder mensagens/mídia), apagando as conversas esvaziadas.
---   * Apaga os 2 registros correspondentes na tabela `migrations`.
+--   * Apaga os 3 registros correspondentes na tabela `migrations`.
 --
 -- Rode em janela de manutenção, com a ingestão parada, e com a imagem ATUAL
 -- (multi-instância) ainda no ar — a imagem antiga não conhece este schema.
@@ -104,7 +105,8 @@ DROP TABLE instances;
 DELETE FROM migrations
  WHERE migration IN (
      '2026_10_16_120000_create_instances_table',
-     '2026_10_16_120001_add_instance_id_to_conversations_and_messages'
+     '2026_10_16_120001_add_instance_id_to_conversations_and_messages',
+     '2026_11_03_162905_encrypt_instance_credentials'
  );
 
 COMMIT;
