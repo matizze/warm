@@ -129,7 +129,7 @@ class ConversationIdentityTest extends TestCase
 
         $result = SendMessage::run(['conversationId' => $conversation->id, 'content' => 'oi']);
 
-        $this->assertSame('PENDING', $result['status']);
+        $this->assertSame('accepted', $result['status']);
         $this->assertSame('5511888888888', $fake->recipient);
     }
 
@@ -143,7 +143,7 @@ class ConversationIdentityTest extends TestCase
 
         $result = SendMessage::run(['conversationId' => $conversation->id, 'content' => 'oi']);
 
-        $this->assertSame('PENDING', $result['status']);
+        $this->assertSame('accepted', $result['status']);
         $this->assertSame('999@g.us', $fake->recipient);
     }
 

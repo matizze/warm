@@ -38,16 +38,18 @@ final class ToolRegistry
         return [
             [
                 'name' => 'message.send',
-                'description' => 'Envia uma mensagem (texto ou mídia já armazenada) por uma conversa.',
+                'description' => 'Envia uma mensagem (texto ou mídia já armazenada) por uma conversa existente (conversationId) ou diretamente para um contato (contactId). Informe exatamente um dos dois. Por contactId o telefone é normalizado, a conversa da instância é reutilizada ou criada e o envio não depende de mensagem recebida. Retorna status do provedor (accepted, sent, delivered, read, failed), messageId e providerMessageId. Se o provedor exigir template fora da janela de 24h, o erro é retornado sem contorno.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'conversationId' => ['type' => 'string', 'description' => 'ID da conversa de destino'],
+                        'conversationId' => ['type' => 'string', 'description' => 'ID da conversa de destino (alternativo a contactId)'],
+                        'contactId' => ['type' => 'string', 'description' => 'ID do contato de destino; reutiliza ou cria a conversa da instância, mesmo sem histórico'],
                         'type' => ['type' => 'string', 'enum' => ['text', 'image', 'audio', 'video', 'document'], 'default' => 'text'],
                         'content' => ['type' => 'string', 'description' => 'Texto ou legenda'],
                         'mediaId' => ['type' => 'string', 'description' => 'ID de mídia previamente enviada (media.upload)'],
+                        'idempotencyKey' => ['type' => 'string', 'description' => 'Chave estável para retries: um reenvio com a mesma chave não dispara outra mensagem'],
                     ],
-                    'required' => ['conversationId'],
+                    'required' => [],
                 ],
             ],
             [
@@ -200,12 +202,22 @@ final class ToolRegistry
      */
     private function validate(string $name, array $arguments): array
     {
+        // message.send targets exactly one of an existing conversation or a
+        // contact. Checked before validation so both/neither always fail with
+        // the same clear message.
+        if ($name === 'message.send'
+            && array_key_exists('conversationId', $arguments) === array_key_exists('contactId', $arguments)) {
+            throw new InvalidArgumentException('Informe exatamente um entre conversationId e contactId.');
+        }
+
         $rules = match ($name) {
             'message.send' => [
-                'conversationId' => ['required', 'uuid'],
+                'conversationId' => ['sometimes', 'uuid'],
+                'contactId' => ['sometimes', 'uuid'],
                 'type' => ['sometimes', 'in:text,image,audio,video,document'],
                 'content' => ['sometimes', 'string'],
                 'mediaId' => ['sometimes', 'uuid'],
+                'idempotencyKey' => ['sometimes', 'string', 'max:128'],
             ],
             'message.search' => [
                 'conversationId' => ['sometimes', 'uuid'],
