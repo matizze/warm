@@ -29,6 +29,20 @@ class ToolRegistryTest extends TestCase
         new ToolRegistry()->call('contact.search', ['limit' => 0]);
     }
 
+    public function test_rejects_a_contact_upsert_without_phone(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new ToolRegistry()->call('contact.upsert', []);
+    }
+
+    public function test_rejects_a_contact_upsert_with_an_invalid_phone(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new ToolRegistry()->call('contact.upsert', ['phoneNumber' => 'telefone']);
+    }
+
     public function test_rejects_an_unknown_search_mode(): void
     {
         $this->expectException(InvalidArgumentException::class);
