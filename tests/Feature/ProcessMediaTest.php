@@ -9,6 +9,7 @@ use App\Processing\ProcessedContent;
 use App\Processing\ProcessingContext;
 use App\Processing\ProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\TestCase;
@@ -62,6 +63,40 @@ class ProcessMediaTest extends TestCase
 
         $this->assertSame('skipped', $media->metadata['processing']['status']);
         $this->assertSame('', $media->extracted_text);
+    }
+
+    public function test_skip_is_observable_with_a_warning_and_a_reason(): void
+    {
+        Log::spy();
+
+        $processor = new class implements MediaProcessor
+        {
+            public function name(): string
+            {
+                return 'nothing';
+            }
+
+            public function supports(ProcessingContext $context): bool
+            {
+                return false;
+            }
+
+            public function process(string $buffer, ProcessingContext $context): ?ProcessedContent
+            {
+                return null;
+            }
+        };
+
+        app()->instance(ProcessingService::class, new ProcessingService([$processor]));
+
+        $media = ProcessMedia::run($this->media(), 'data');
+
+        $this->assertSame('skipped', $media->metadata['processing']['status']);
+        $this->assertSame('no_result', $media->metadata['processing']['reason']);
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn (string $message): bool => str_contains($message, 'Processamento de mídia ignorado'));
     }
 
     public function test_aggregates_processor_results_and_marks_done(): void

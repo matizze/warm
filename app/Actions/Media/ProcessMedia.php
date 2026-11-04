@@ -43,7 +43,16 @@ final class ProcessMedia
         $metadata = $media->metadata ?? [];
 
         if ($results === []) {
-            $metadata['processing'] = ['status' => 'skipped', 'processor' => null];
+            // Observable by design: a skip means no processor matched or a
+            // processor lacked configuration (e.g. missing OPENAI_API_KEY), so
+            // it must leave a trace instead of silently masking the cause.
+            logger()->warning('Processamento de mídia ignorado', [
+                'media_id' => $media->id,
+                'type' => $media->type,
+                'mime_type' => $media->mime_type,
+            ]);
+
+            $metadata['processing'] = ['status' => 'skipped', 'processor' => null, 'reason' => 'no_result'];
             $media->forceFill(['extracted_text' => '', 'metadata' => $metadata])->save();
 
             return $media;
