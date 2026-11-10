@@ -18,9 +18,9 @@ Route::post('/instance/{instance}/mcp', McpController::class)
     ->middleware(['instance.resolve', 'mcp.auth'])
     ->name('instance.mcp');
 
-// Legacy single-instance routes route to the default instance.
-Route::post('/webhook', ReceiveWebhook::class)->middleware('webhook.auth');
+// Legacy single-instance routes target the default instance (and its tokens).
+Route::post('/webhook', ReceiveWebhook::class)->middleware(['instance.resolve', 'webhook.auth']);
 
 Route::post('/admin/reindex', AdminReindex::class)->middleware('admin.auth');
 
-Route::post('/mcp', McpController::class)->middleware('mcp.auth');
+Route::post('/mcp', McpController::class)->middleware(['instance.resolve', 'mcp.auth']);

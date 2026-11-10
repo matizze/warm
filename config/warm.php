@@ -20,22 +20,10 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'webhook_token' => env('WEBHOOK_TOKEN', ''),
     'admin_token' => env('ADMIN_TOKEN', ''),
-    // Empty disables the HTTP MCP endpoint (POST /mcp returns 404).
-    'mcp_token' => env('MCP_TOKEN', ''),
 
-    /*
-    |--------------------------------------------------------------------------
-    | Evolution provider
-    |--------------------------------------------------------------------------
-    */
-
-    'evolution' => [
-        'url' => rtrim(env('EVOLUTION_URL', 'http://localhost:8080'), '/'),
-        'api_key' => env('EVOLUTION_API_KEY', ''),
-        'instance' => env('EVOLUTION_INSTANCE_ID', 'instance1'),
-    ],
+    // Per-instance credentials (Evolution URL/key, webhook and MCP tokens) live
+    // only in the `instances` table. Manage them with `warm:instance:*`.
 
     /*
     |--------------------------------------------------------------------------

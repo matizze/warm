@@ -7,6 +7,7 @@ use App\Models\Conversation;
 use App\Models\Instance;
 use App\Models\Message;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -118,14 +119,18 @@ class InstanceWebhookTest extends TestCase
         $this->assertSame(['personal', 'support'], $byInstance);
     }
 
-    public function test_default_instance_is_seeded_from_the_environment(): void
+    public function test_legacy_env_installation_is_upgraded_into_an_encrypted_default_instance(): void
     {
         $default = Instance::default();
 
         $this->assertNotNull($default);
-        $this->assertSame(config('warm.evolution.instance'), $default->instance_id);
-        $this->assertSame(config('warm.webhook_token'), $default->webhook_token);
-        $this->assertSame(config('warm.mcp_token'), $default->mcp_token);
+        $this->assertSame('instance1', $default->instance_id);
+        $this->assertSame('test-token', $default->webhook_token);
+        $this->assertSame('test-mcp-token', $default->mcp_token);
+
+        $stored = DB::table('instances')->where('instance_id', 'instance1')->first();
+        $this->assertNotSame('test-token', $stored->webhook_token);
+        $this->assertNotSame('test-mcp-token', $stored->mcp_token);
     }
 
     public function test_conversation_without_an_instance_falls_back_to_the_default(): void

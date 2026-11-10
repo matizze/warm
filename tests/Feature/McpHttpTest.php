@@ -2,11 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Models\Instance;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class McpHttpTest extends TestCase
 {
+    use RefreshDatabase;
+
     /**
      * @param  array<string, mixed>  $payload
      * @param  array<string, string>  $headers
@@ -18,26 +22,41 @@ class McpHttpTest extends TestCase
         ]);
     }
 
-    public function test_endpoint_is_disabled_without_configured_token(): void
+    public function test_endpoint_rejects_everything_when_the_default_instance_has_no_token(): void
     {
-        config(['warm.mcp_token' => '']);
+        Instance::default()->update(['mcp_token' => null]);
 
-        $this->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'])
+        $this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'])
+            ->assertStatus(401);
+    }
+
+    public function test_endpoint_checks_the_token_stored_for_the_default_instance(): void
+    {
+        Instance::default()->update(['mcp_token' => 'rotated-token']);
+
+        $this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'])
+            ->assertStatus(401);
+
+        $this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'], ['Authorization' => 'Bearer rotated-token'])
+            ->assertOk();
+    }
+
+    public function test_endpoint_is_not_found_without_a_default_instance(): void
+    {
+        Instance::default()->update(['is_default' => false]);
+
+        $this->mcp(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'])
             ->assertStatus(404);
     }
 
     public function test_endpoint_rejects_missing_token(): void
     {
-        config(['warm.mcp_token' => 'secret']);
-
         $this->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'])
             ->assertStatus(401);
     }
 
     public function test_endpoint_rejects_wrong_token(): void
     {
-        config(['warm.mcp_token' => 'secret']);
-
         $this->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'], [
             'Authorization' => 'Bearer wrong',
         ])->assertStatus(401);

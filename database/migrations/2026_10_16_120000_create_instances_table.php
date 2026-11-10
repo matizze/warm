@@ -22,17 +22,26 @@ return new class extends Migration
             $table->index('is_default');
         });
 
-        // The single instance this installation used so far (env-driven) becomes
-        // the default instance, so existing data and the legacy routes keep
-        // working without an operator having to register anything.
+        // Upgrade path for installations that predate multi-instance support:
+        // the instance they configured through env becomes the default one, so
+        // existing data and the legacy routes keep working. Fresh installs set
+        // no EVOLUTION_INSTANCE_ID and register instances with
+        // `warm:instance:create` instead. env() is read directly because these
+        // keys are no longer part of the config.
+        $instanceId = (string) env('EVOLUTION_INSTANCE_ID', '');
+
+        if ($instanceId === '') {
+            return;
+        }
+
         $now = now();
 
         DB::table('instances')->insertOrIgnore([
-            'instance_id' => (string) config('warm.evolution.instance', 'instance1'),
-            'evolution_url' => (string) config('warm.evolution.url', ''),
-            'api_key' => (string) config('warm.evolution.api_key', ''),
-            'webhook_token' => (string) config('warm.webhook_token', ''),
-            'mcp_token' => ((string) config('warm.mcp_token', '')) ?: null,
+            'instance_id' => $instanceId,
+            'evolution_url' => rtrim((string) env('EVOLUTION_URL', ''), '/'),
+            'api_key' => (string) env('EVOLUTION_API_KEY', ''),
+            'webhook_token' => (string) env('WEBHOOK_TOKEN', ''),
+            'mcp_token' => ((string) env('MCP_TOKEN', '')) ?: null,
             'is_default' => true,
             'active' => true,
             'created_at' => $now,

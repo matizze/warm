@@ -4,6 +4,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
@@ -25,6 +26,12 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "branch_name=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login GHCR
         uses: docker/login-action@v3
         with:
@@ -37,25 +44,57 @@ jobs:
           GIT_HASH="${{ steps.vars.outputs.sha_short }}"
           BRANCH="${{ steps.vars.outputs.branch_name }}"
 
-          echo "Building ${REGISTRY}:${GIT_HASH} (${BRANCH})"
+          echo "Building ${REGISTRY}:${GIT_HASH} (${BRANCH}) for linux/amd64,linux/arm64"
 
-          docker build \
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
             --build-arg WWWUSER=1000 \
             --build-arg WWWGROUP=1000 \
             -f deployment/Dockerfile \
             -t ${REGISTRY}:${GIT_HASH} \
             -t ${REGISTRY}:${BRANCH} \
             -t ${REGISTRY}:latest \
+            --push \
             .
-
-          docker push ${REGISTRY}:${GIT_HASH}
-          docker push ${REGISTRY}:${BRANCH}
-          docker push ${REGISTRY}:latest
 
           echo "Pushed: ${REGISTRY}:${GIT_HASH}"
 
-      - name: Deploy (webhook)
-        if: ${{ env.DEPLOY_WEBHOOK != '' }}
+      # The servers pull without credentials, so the package must stay public.
+      # GitHub has no API to pin package visibility; fail loudly instead.
+      - name: Verify image is public
+        env:
+          GIT_HASH: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          IMAGE="${REGISTRY#ghcr.io/}"
+          TOKEN=$(curl -fsS "https://ghcr.io/token?scope=repository:${IMAGE}:pull" | jq -r .token)
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            "https://ghcr.io/v2/${IMAGE}/manifests/${GIT_HASH}")
+
+          if [ "${STATUS}" != "200" ]; then
+            echo "::error::ghcr.io/${IMAGE}:${GIT_HASH} is not publicly pullable (HTTP ${STATUS}). Set the package visibility to Public: https://github.com/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/package/${IMAGE#*/}/settings"
+            exit 1
+          fi
+
+          echo "ghcr.io/${IMAGE}:${GIT_HASH} is public."
+
+      # Production deploys only from main. DEPLOY_WEBHOOK holds one Portainer
+      # service webhook URL per line (app, worker, scheduler); `?tag=` repoints
+      # each service to the image just pushed.
+      - name: Deploy (Portainer webhooks)
+        if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         env:
           DEPLOY_WEBHOOK: ${{ secrets.DEPLOY_WEBHOOK }}
-        run: curl -X POST "${DEPLOY_WEBHOOK}"
+          GIT_HASH: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          if [ -z "${DEPLOY_WEBHOOK}" ]; then
+            echo "DEPLOY_WEBHOOK not set, skipping deploy."
+            exit 0
+          fi
+
+          for url in ${DEPLOY_WEBHOOK}; do
+            curl -fsS -X POST "${url}?tag=${GIT_HASH}"
+          done
+
+          echo "Deploy triggered for ${GIT_HASH}"
