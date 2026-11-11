@@ -71,6 +71,7 @@ final class UpsertContact
 
             if (is_string($name) && trim($name) !== '') {
                 $contact->name = trim($name);
+                $contact->name_is_custom = true;
             }
 
             if (is_string($observations) && trim($observations) !== '') {

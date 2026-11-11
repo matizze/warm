@@ -28,13 +28,13 @@ class ContactRenameTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function inbound(string $id, string $jid): array
+    private function inbound(string $id, string $jid, string $pushName = 'Ana'): array
     {
         return [
             'event' => 'messages.upsert',
             'data' => [
                 'key' => ['remoteJid' => $jid, 'fromMe' => false, 'id' => $id],
-                'pushName' => 'Ana',
+                'pushName' => $pushName,
                 'message' => ['conversation' => 'Oi'],
                 'messageType' => 'conversation',
                 'messageTimestamp' => 1758000000,
@@ -114,6 +114,56 @@ class ContactRenameTest extends TestCase
         $this->assertSame(1, Contact::count());
         $this->assertSame(1, Conversation::count());
         $this->assertSame(1, Message::count());
+    }
+
+    public function test_a_manual_rename_is_not_overwritten_by_the_next_inbound_push_name(): void
+    {
+        Queue::fake();
+        $instance = $this->makeInstance('support', 'mcp-support', ['webhook_token' => 'wh-support']);
+
+        $this->postJson('/instance/support/webhook', $this->inbound('S-1', '5511988887777@s.whatsapp.net', 'Ana'), [
+            'x-webhook-token' => 'wh-support',
+        ])->assertOk();
+
+        $this->callTool($instance, 'contact.rename', [
+            'phoneNumber' => '5511988887777',
+            'name' => 'Ana Souza',
+        ]);
+
+        $this->postJson('/instance/support/webhook', $this->inbound('S-2', '5511988887777@s.whatsapp.net', 'Ana Clara'), [
+            'x-webhook-token' => 'wh-support',
+        ])->assertOk();
+
+        $contact = Contact::sole();
+        $this->assertSame('Ana Souza', $contact->name);
+        $this->assertSame('Ana Clara', $contact->push_name);
+        $this->assertTrue($contact->name_is_custom);
+        $this->assertSame(1, Contact::count());
+        $this->assertSame(1, Conversation::count());
+        $this->assertSame(2, Message::count());
+    }
+
+    public function test_an_inbound_only_contact_keeps_following_the_push_name(): void
+    {
+        Queue::fake();
+        $this->makeInstance('support', 'mcp-support', ['webhook_token' => 'wh-support']);
+
+        $this->postJson('/instance/support/webhook', $this->inbound('S-1', '5511988887777@s.whatsapp.net', 'Ana'), [
+            'x-webhook-token' => 'wh-support',
+        ])->assertOk();
+
+        $this->assertSame('Ana', Contact::sole()->name);
+        $this->assertFalse(Contact::sole()->name_is_custom);
+
+        $this->postJson('/instance/support/webhook', $this->inbound('S-2', '5511988887777@s.whatsapp.net', 'Ana Clara'), [
+            'x-webhook-token' => 'wh-support',
+        ])->assertOk();
+
+        $contact = Contact::sole();
+        $this->assertSame('Ana Clara', $contact->name);
+        $this->assertSame('Ana Clara', $contact->push_name);
+        $this->assertFalse($contact->name_is_custom);
+        $this->assertSame(1, Contact::count());
     }
 
     public function test_renames_by_contact_id(): void
@@ -208,6 +258,7 @@ class ContactRenameTest extends TestCase
         $this->assertTrue($first['payload']['updated']);
         $this->assertFalse($second['payload']['updated']);
         $this->assertSame('Ana Maria', $second['payload']['contact']['name']);
+        $this->assertTrue(Contact::sole()->name_is_custom);
         $this->assertSame(1, Contact::count());
         $this->assertSame(1, Conversation::count());
         $this->assertEquals($afterFirst, Contact::sole()->updated_at);

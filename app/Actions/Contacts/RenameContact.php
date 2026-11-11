@@ -46,6 +46,7 @@ final class RenameContact
 
         if ($updated) {
             $contact->name = $name;
+            $contact->name_is_custom = true;
             $contact->save();
         }
 
