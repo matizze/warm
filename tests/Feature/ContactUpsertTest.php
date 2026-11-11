@@ -131,6 +131,25 @@ class ContactUpsertTest extends TestCase
         $this->assertSame(0, Conversation::count());
     }
 
+    public function test_an_empty_name_is_a_validation_error_and_writes_nothing(): void
+    {
+        $instance = $this->makeInstance('support', 'mcp-support');
+
+        foreach (['', '   '] as $name) {
+            $result = $this->callTool($instance, 'contact.upsert', [
+                'phoneNumber' => '5511988887777',
+                'name' => $name,
+            ]);
+
+            $this->assertTrue($result['isError']);
+            $this->assertArrayHasKey('error', $result['payload']);
+            $this->assertStringContainsString('Nome inválido', $result['payload']['error']);
+        }
+
+        $this->assertSame(0, Contact::count());
+        $this->assertSame(0, Conversation::count());
+    }
+
     public function test_a_contact_of_another_instance_cannot_be_read_or_changed(): void
     {
         $support = $this->makeInstance('support', 'mcp-support');
@@ -277,7 +296,8 @@ class ContactUpsertTest extends TestCase
                 ->all();
 
             $this->assertContains('contact.upsert', $names);
-            $this->assertCount(10, $names);
+            $this->assertContains('contact.rename', $names);
+            $this->assertCount(11, $names);
         }
     }
 }

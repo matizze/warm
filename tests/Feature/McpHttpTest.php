@@ -87,7 +87,8 @@ class McpHttpTest extends TestCase
         $this->assertContains('media.download', $names);
         $this->assertContains('media.upload', $names);
         $this->assertContains('contact.upsert', $names);
-        $this->assertCount(10, $names);
+        $this->assertContains('contact.rename', $names);
+        $this->assertCount(11, $names);
     }
 
     public function test_notifications_get_an_empty_accepted_response(): void
