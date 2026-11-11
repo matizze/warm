@@ -17,8 +17,16 @@ class Contact extends Model
         'phone_number',
         'name',
         'push_name',
+        'name_is_custom',
         'observations',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'name_is_custom' => 'boolean',
+        ];
+    }
 
     public function conversations(): HasMany
     {

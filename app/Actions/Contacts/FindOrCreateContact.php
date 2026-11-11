@@ -18,7 +18,13 @@ final class FindOrCreateContact
         }
 
         if (is_string($name) && $name !== '') {
-            $contact->name = $name;
+            $contact->push_name = $name;
+
+            // A name edited by the operator (rename/upsert) wins over the
+            // provider pushName; an unnamed contact keeps following it.
+            if (! $contact->name_is_custom || $contact->name === null || $contact->name === '') {
+                $contact->name = $name;
+            }
         }
 
         $contact->save();

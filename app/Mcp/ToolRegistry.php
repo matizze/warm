@@ -3,7 +3,9 @@
 namespace App\Mcp;
 
 use App\Actions\Contacts\GetContact;
+use App\Actions\Contacts\RenameContact;
 use App\Actions\Contacts\SearchContacts;
+use App\Actions\Contacts\UpsertContact;
 use App\Actions\Conversations\SearchConversations;
 use App\Actions\Groups\GetGroup;
 use App\Actions\Groups\SearchGroups;
@@ -13,6 +15,8 @@ use App\Actions\Messages\SearchMessages;
 use App\Actions\Messages\SendMessage;
 use App\Enums\SearchMode;
 use App\Models\Instance;
+use App\Support\PhoneNumber;
+use Closure;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -70,6 +74,32 @@ final class ToolRegistry
                     'type' => 'object',
                     'properties' => ['contactId' => ['type' => 'string']],
                     'required' => ['contactId'],
+                ],
+            ],
+            [
+                'name' => 'contact.upsert',
+                'description' => 'Cria ou atualiza um contato da instância. O telefone é normalizado para E.164 e o mesmo número não duplica.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'phoneNumber' => ['type' => 'string', 'description' => 'Telefone (E.164 ou formatado, com DDI)'],
+                        'name' => ['type' => 'string'],
+                        'observations' => ['type' => 'string', 'description' => 'Notas livres sobre o contato'],
+                    ],
+                    'required' => ['phoneNumber'],
+                ],
+            ],
+            [
+                'name' => 'contact.rename',
+                'description' => 'Renomeia um contato existente por contactId ou telefone. Grava apenas o nome: não cria contato, conversa nem mensagem.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'contactId' => ['type' => 'string', 'description' => 'ID do contato (alternativa a phoneNumber)'],
+                        'phoneNumber' => ['type' => 'string', 'description' => 'Telefone do contato, E.164 ou formatado com DDI (alternativa a contactId)'],
+                        'name' => ['type' => 'string', 'description' => 'Novo nome do contato'],
+                    ],
+                    'required' => ['name'],
                 ],
             ],
             [
@@ -164,6 +194,18 @@ final class ToolRegistry
             'message.send' => SendMessage::run($arguments, $this->instance),
             'contact.search' => SearchContacts::run($arguments),
             'contact.get' => GetContact::run((string) $arguments['contactId']),
+            'contact.upsert' => UpsertContact::run(
+                (string) $arguments['phoneNumber'],
+                $arguments['name'] ?? null,
+                $arguments['observations'] ?? null,
+                $this->instance,
+            ),
+            'contact.rename' => RenameContact::run(
+                isset($arguments['contactId']) ? (string) $arguments['contactId'] : null,
+                isset($arguments['phoneNumber']) ? (string) $arguments['phoneNumber'] : null,
+                (string) $arguments['name'],
+                $this->instance,
+            ),
             'group.search' => SearchGroups::run($arguments),
             'group.get' => GetGroup::run((string) $arguments['groupId']),
             'message.search' => SearchMessages::run(
@@ -227,6 +269,53 @@ final class ToolRegistry
                 'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
             ],
             'contact.get' => ['contactId' => ['required', 'uuid']],
+            'contact.upsert' => [
+                'phoneNumber' => [
+                    'required',
+                    'string',
+                    function (string $attribute, mixed $value, Closure $fail): void {
+                        if (! is_string($value) || PhoneNumber::normalize($value) === null) {
+                            $fail('Telefone inválido: informe um número com DDI/DDD (E.164).');
+                        }
+                    },
+                ],
+                'name' => [
+                    'sometimes',
+                    'nullable',
+                    'string',
+                    'max:255',
+                    function (string $attribute, mixed $value, Closure $fail): void {
+                        if (is_string($value) && trim($value) === '') {
+                            $fail('Nome inválido: informe um nome não vazio.');
+                        }
+                    },
+                ],
+                'observations' => ['sometimes', 'nullable', 'string', 'max:10000'],
+            ],
+            'contact.rename' => [
+                'contactId' => ['sometimes', 'nullable', 'uuid', 'required_without:phoneNumber'],
+                'phoneNumber' => [
+                    'sometimes',
+                    'nullable',
+                    'string',
+                    'required_without:contactId',
+                    function (string $attribute, mixed $value, Closure $fail): void {
+                        if (is_string($value) && $value !== '' && PhoneNumber::normalize($value) === null) {
+                            $fail('Telefone inválido: informe um número com DDI/DDD (E.164).');
+                        }
+                    },
+                ],
+                'name' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    function (string $attribute, mixed $value, Closure $fail): void {
+                        if (! is_string($value) || trim($value) === '') {
+                            $fail('Nome inválido: informe um nome não vazio.');
+                        }
+                    },
+                ],
+            ],
             'group.search' => [
                 'name' => ['sometimes', 'string'],
                 'search' => ['sometimes', 'string'],
@@ -249,8 +338,23 @@ final class ToolRegistry
             default => throw new InvalidArgumentException("Unknown tool: {$name}"),
         };
 
+        $messages = match ($name) {
+            'contact.upsert' => [
+                'phoneNumber.required' => 'Telefone inválido: informe um número com DDI/DDD (E.164).',
+                'name.string' => 'Nome inválido: informe um nome não vazio.',
+            ],
+            'contact.rename' => [
+                'contactId.required_without' => 'Informe contactId ou phoneNumber.',
+                'contactId.uuid' => 'contactId inválido.',
+                'phoneNumber.required_without' => 'Informe contactId ou phoneNumber.',
+                'name.required' => 'Nome inválido: informe um nome não vazio.',
+                'name.string' => 'Nome inválido: informe um nome não vazio.',
+            ],
+            default => [],
+        };
+
         try {
-            return Validator::make($arguments, $rules)->validate();
+            return Validator::make($arguments, $rules, $messages)->validate();
         } catch (ValidationException $e) {
             throw new InvalidArgumentException($e->validator->errors()->first());
         }
