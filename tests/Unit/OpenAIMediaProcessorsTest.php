@@ -6,6 +6,7 @@ use App\Integrations\OpenAI\OpenAIAudioProcessor;
 use App\Integrations\OpenAI\OpenAIImageProcessor;
 use App\Processing\ProcessingContext;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class OpenAIMediaProcessorsTest extends TestCase
@@ -41,9 +42,15 @@ class OpenAIMediaProcessorsTest extends TestCase
 
     public function test_audio_processor_skips_without_key(): void
     {
+        Log::spy();
+
         $context = new ProcessingContext(type: 'audio', mimeType: 'audio/ogg', filename: 'note.ogg');
 
         $this->assertNull((new OpenAIAudioProcessor(['openai_key' => '']))->process('audio-bytes', $context));
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn (string $message): bool => str_contains($message, 'OPENAI_API_KEY ausente'));
     }
 
     public function test_image_processor_describes_image_and_extracts_ocr(): void
@@ -67,8 +74,14 @@ class OpenAIMediaProcessorsTest extends TestCase
 
     public function test_image_processor_returns_null_without_key(): void
     {
+        Log::spy();
+
         $context = new ProcessingContext(type: 'image', mimeType: 'image/png', filename: 'scan.png');
 
         $this->assertNull((new OpenAIImageProcessor(['openai_key' => '']))->process('img', $context));
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn (string $message): bool => str_contains($message, 'OPENAI_API_KEY ausente'));
     }
 }

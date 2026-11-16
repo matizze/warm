@@ -32,6 +32,11 @@ final class OpenAIImageProcessor implements MediaProcessor
     {
         $key = $this->config['openai_key'] ?? '';
         if ($key === '') {
+            logger()->warning('OPENAI_API_KEY ausente: descrição de imagem ignorada', [
+                'processor' => $this->name(),
+                'filename' => $context->filename,
+            ]);
+
             return null;
         }
 
