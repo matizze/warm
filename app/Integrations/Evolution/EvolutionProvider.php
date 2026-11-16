@@ -6,6 +6,7 @@ use App\Contracts\WhatsAppProvider;
 use App\Data\OutgoingMessage;
 use App\Data\ProviderMedia;
 use App\Data\SendResult;
+use App\Enums\MessageStatus;
 use App\Exceptions\ProviderException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
@@ -108,9 +109,32 @@ final class EvolutionProvider implements WhatsAppProvider
      */
     private function toResult(array $result): SendResult
     {
+        $rawStatus = is_string($result['status'] ?? null) ? $result['status'] : null;
+        $status = MessageStatus::fromProvider($rawStatus);
+
         return new SendResult(
-            status: (string) ($result['status'] ?? 'sent'),
+            status: $status->value,
             providerMessageId: $result['key']['id'] ?? null,
+            providerStatus: $rawStatus,
+            error: $status === MessageStatus::Failed ? $this->providerError($result) : null,
         );
+    }
+
+    /**
+     * Provider failures can arrive as a 2xx payload with `status: ERROR`; keep
+     * the provider's own reason so `message.send` can return it verbatim.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function providerError(array $result): string
+    {
+        foreach (['message', 'error', 'response'] as $key) {
+            $reason = $result[$key] ?? null;
+            if (is_string($reason) && trim($reason) !== '') {
+                return mb_substr(trim($reason), 0, 500);
+            }
+        }
+
+        return 'O provedor recusou a mensagem.';
     }
 }

@@ -111,9 +111,11 @@ final class McpServer
         try {
             $result = $this->tools->call($name, $arguments);
 
+            $status = is_array($result) ? ($result['status'] ?? null) : null;
+
             return [
                 'content' => [['type' => 'text', 'text' => json_encode($result, JSON_UNESCAPED_UNICODE)]],
-                'isError' => is_array($result) && ($result['status'] ?? null) === 'error',
+                'isError' => in_array($status, ['error', 'failed'], true),
             ];
         } catch (Throwable $e) {
             // A provider failure on message.send is an expected domain error:
