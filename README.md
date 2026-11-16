@@ -565,6 +565,44 @@ Um servidor Linux comum (2 vCPU / 2 GB já atende bem no começo).
 > **Resumo do que precisa ficar ligado em produção:** servidor web (Nginx/PHP),
 > worker da fila, agendador (cron) e o banco. O MCP roda onde a IA roda.
 
+### Pipeline de imagem e deploy (GHCR)
+
+O workflow [`.github/workflows/docker.yaml`](.github/workflows/docker.yaml)
+constrói a imagem da stack e publica no GHCR. Build e publicação são separados:
+pull request só valida o build, e deploy só acontece em `push` para a `main`.
+
+| Evento | Build | Tags publicadas | Deploy |
+|---|---|---|---|
+| `pull_request` para `main`/`develop` | sim (local, amd64) | **nenhuma** | não |
+| `push` em `develop` | multi-arch (`amd64`,`arm64`) | `:<sha-completo>`, `:develop` | não |
+| `push` em `main` | multi-arch (`amd64`,`arm64`) | `:<sha-completo>`, `:main`, `:latest` | sim, por digest, após aprovação |
+
+- **PR nunca faz login no GHCR nem push.** O build usa `--load` e cache do
+  GitHub Actions apenas para validar a imagem.
+- **`:<sha-completo>` é a tag imutável de referência.** Use o SHA (ou o digest)
+  para deploy e rollback; `:main` e `:develop` são atalhos móveis da branch.
+- **`:latest` só é publicado a partir da `main`.** PRs e `develop` nunca mexem
+  em `:latest`.
+- O job de deploy roda **depois** do build+push, com `concurrency` serial (sem
+  `cancel-in-progress`), no GitHub Environment `production` (aprovação
+  obrigatória). Ele envia a imagem pelo **digest** (`ghcr.io/matizze/warm@sha256:…`),
+  nunca por tag móvel, e verifica no final que o digest em execução na stack é o
+  mesmo que foi publicado.
+
+O contrato de deploy (Environment, secret `PORTAINER_API_KEY`, variables
+`PORTAINER_URL`/`PORTAINER_ENDPOINT_ID`/`PORTAINER_STACK_ID`, chamadas à API do
+Portainer e verificação da imagem em execução) está em
+[`deployment/PORTAINER-DEPLOY.md`](deployment/PORTAINER-DEPLOY.md). O job do
+workflow segue aquele documento; não duplique os valores aqui.
+
+#### Deploy manual e rollback
+
+O deploy normal é automático ao mergear na `main`. Para deploy manual, rollback
+ou repin, siga [`deployment/PORTAINER-DEPLOY.md`](deployment/PORTAINER-DEPLOY.md):
+use sempre `APP_IMAGE=ghcr.io/matizze/warm@sha256:<digest>`, nunca `:latest`,
+`:main` ou `:develop`. Rollback que envolva migração de schema segue também a
+seção [Rollback de versão](#rollback-de-versão) abaixo.
+
 ---
 
 ## Segurança e privacidade
@@ -640,7 +678,8 @@ Passos (em janela de manutenção, com a ingestão parada):
    são mescladas — daí o backup do passo 1.
 4. **Repin da imagem:** aponte `APP_IMAGE` para o digest anterior conhecido
    (o digest pré-multi-instância usado no rollout foi
-   `main@sha256:e5fa1d15…`) e redeploy da stack.
+   `main@sha256:e5fa1d15…`) e redeploy da stack. Use sempre
+   `ghcr.io/matizze/warm@sha256:…` — nunca `:latest`, `:main` ou `:develop`.
 5. **Validar:** `/up` (ou `/health`) responde 200; a rota legada `/webhook`
    autentica com o `WEBHOOK_TOKEN` do `.env` (a imagem antiga volta a lê-lo, então
    ele precisa estar de volta na stack); e uma mensagem de entrada é
