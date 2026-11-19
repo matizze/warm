@@ -4,6 +4,7 @@ use App\Actions\Search\AdminReindex;
 use App\Actions\System\HealthCheck;
 use App\Actions\Webhook\ReceiveWebhook;
 use App\Http\Controllers\McpController;
+use App\Http\Controllers\UploadMediaController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthCheck::class);
@@ -18,9 +19,15 @@ Route::post('/instance/{instance}/mcp', McpController::class)
     ->middleware(['instance.resolve', 'mcp.auth'])
     ->name('instance.mcp');
 
+Route::post('/instance/{instance}/media', UploadMediaController::class)
+    ->middleware(['instance.resolve', 'mcp.auth'])
+    ->name('instance.media');
+
 // Legacy single-instance routes target the default instance (and its tokens).
 Route::post('/webhook', ReceiveWebhook::class)->middleware(['instance.resolve', 'webhook.auth']);
 
 Route::post('/admin/reindex', AdminReindex::class)->middleware('admin.auth');
 
 Route::post('/mcp', McpController::class)->middleware(['instance.resolve', 'mcp.auth']);
+
+Route::post('/media', UploadMediaController::class)->middleware(['instance.resolve', 'mcp.auth']);

@@ -27,12 +27,13 @@ pergunta à IA e ela responde com base no que foi conversado.
 8. [Conectar a IA (MCP)](#conectar-a-ia-mcp)
 9. [O que você pode pedir para a IA](#o-que-você-pode-pedir-para-a-ia)
 10. [Áudio, imagem e PDF (processamento)](#áudio-imagem-e-pdf-processamento)
-11. [Múltiplas instâncias (vários números)](#múltiplas-instâncias-vários-números)
-12. [Hospedar em produção](#hospedar-em-produção)
-13. [Segurança e privacidade](#segurança-e-privacidade)
-14. [Manutenção do dia a dia](#manutenção-do-dia-a-dia)
-15. [Problemas comuns](#problemas-comuns)
-16. [Apêndice técnico](#apêndice-técnico)
+11. [Enviar mídia (sem base64 no tool call)](#enviar-mídia-sem-base64-no-tool-call)
+12. [Múltiplas instâncias (vários números)](#múltiplas-instâncias-vários-números)
+13. [Hospedar em produção](#hospedar-em-produção)
+14. [Segurança e privacidade](#segurança-e-privacidade)
+15. [Manutenção do dia a dia](#manutenção-do-dia-a-dia)
+16. [Problemas comuns](#problemas-comuns)
+17. [Apêndice técnico](#apêndice-técnico)
 
 ---
 
@@ -406,7 +407,7 @@ A IA tem 11 "ferramentas" do WARM. Em linguagem simples:
 | `group.search` / `group.get` | procura grupos e contexto | "Qual o assunto do grupo de implantação?" |
 | `message.send` | envia mensagem | "Manda pro João: reunião amanhã às 10h" |
 | `media.download` | baixa a mídia de uma mensagem | "Baixe o áudio daquela mensagem" |
-| `media.upload` | adiciona uma mídia para enviar depois | "Prepare essa foto para enviar" |
+| `media.upload` | adiciona uma mídia (base64, URL ou multipart) para enviar depois | "Prepare essa foto para enviar" |
 
 A IA **não** mexe direto nas tabelas nem vê credenciais: ela só usa essas
 capacidades.
@@ -422,6 +423,64 @@ Quando `PROCESSING_ENABLED=true` e há `OPENAI_API_KEY`:
 Esse conteúdo entra na busca, então você acha um áudio ou uma foto pelo que ele
 **diz**, não pelo nome do arquivo. Se o processamento falhar, o sistema registra
 o erro e **nunca inventa** conteúdo.
+
+## Enviar mídia (sem base64 no tool call)
+
+O agente não precisa (nem consegue) escrever megabytes de base64 nos argumentos
+da tool. Há três caminhos, todos devolvendo o mesmo `mediaId` de `Media::present()`,
+que é o que `message.send` aceita:
+
+1. **`base64`** — só para arquivos pequenos, quando o conteúdo já está à mão.
+2. **`url`** — o servidor baixa um arquivo público por HTTPS. Exige exatamente um
+   entre `url` e `base64`; usar os dois juntos é recusado.
+3. **Endpoint multipart** — para um arquivo que existe na máquina do agente:
+
+   ```bash
+   curl -sS -X POST "https://seu-dominio/instance/{instance}/media" \
+     -H "Authorization: Bearer $MCP_TOKEN" \
+     -F "file=@relatorio.pdf" \
+     -F "type=document"
+   ```
+
+   `file` é obrigatório; `type`, `filename`, `mimeType` e `messageId` são
+   opcionais (`type` é inferido do conteúdo quando omitido). A rota legada
+   `POST /media` atende a instância default com o token dela. Sem token → `401`.
+
+### Proteções e validação (iguais nos dois caminhos)
+
+- Somente `https`, porta 443, sem credenciais na URL.
+- SSRF: loopback, IPs privados/reservados (RFC1918, `169.254.169.254` e outras
+  faixas de metadados), IPv6 equivalente (`::1`, `fc00::/7`, `fe80::/10`) e
+  **hosts que resolvem para esses IPs** são recusados — a checagem roda no DNS,
+  a cada redirect (máximo de 3).
+- Timeout de conexão (10 s) e de download (120 s).
+- Limite por tipo conferido no `Content-Length` e durante o streaming:
+
+  | Tipo | Limite |
+  |---|---|
+  | imagem | 5 MB |
+  | áudio | 16 MB |
+  | vídeo | 16 MB |
+  | documento | 100 MB |
+
+- O `mimeType` é detectado pelo **conteúdo** (não pela extensão) e precisa ser
+  compatível com o `type` informado.
+
+### Limites do proxy e do PHP
+
+O maior arquivo aceito é 100 MB (documento). O runtime tem folga para o
+overhead do multipart:
+
+| Onde | Valor |
+|---|---|
+| aplicação (`config/warm.php` → `media.max_request_bytes`) | 105 MB |
+| Nginx (`deployment/runtime/nginx.conf` → `client_max_body_size`) | 110 MB |
+| PHP (`upload_max_filesize` / `post_max_size`) | 105 MB / 110 MB |
+| PHP (`memory_limit`) | 512 MB |
+| Nginx/PHP (`fastcgi_read_timeout` / `max_execution_time`) | 600 s |
+
+Se houver um proxy na frente (Cloudflare/Traefik), confira o limite de corpo
+dele também — ele precisa comportar os mesmos 110 MB.
 
 ## Busca: palavras × significado
 
@@ -693,8 +752,10 @@ Para quem for mexer no código.
 |---|---|---|
 | POST | `/instance/{id}/webhook` | recebe eventos da instância `{id}` (auth: `x-webhook-token` ou `?token=` do `webhook_token` da instância; 401 sem/errado, 404 inexistente/inativa). |
 | POST | `/instance/{id}/mcp` | MCP HTTP no contexto da instância `{id}` (auth: `Authorization: Bearer <mcp_token>`; 401/404 como acima). |
+| POST | `/instance/{id}/media` | upload multipart (`file`) no contexto da instância `{id}`, devolve `mediaId` (auth: `Authorization: Bearer <mcp_token>`; 401/404 como acima). |
 | POST | `/webhook` | rota legada → instância default (auth: `webhook_token` dela; 404 sem default). |
 | POST | `/mcp` | rota legada → instância default (auth: `mcp_token` dela; 404 sem default). |
+| POST | `/media` | rota legada de upload multipart → instância default (auth: `mcp_token` dela; 404 sem default). |
 | GET | `/health` | `{"status":"ok"}`. |
 | POST | `/admin/reindex` | dispara a reindexação (auth: `x-admin-token`; 404 se `ADMIN_TOKEN` vazio). |
 

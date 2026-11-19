@@ -166,17 +166,22 @@ final class ToolRegistry
             ],
             [
                 'name' => 'media.upload',
-                'description' => 'Adiciona uma mídia ao sistema (base64) para uso posterior em message.send.',
+                'description' => 'Adiciona uma mídia para uso posterior em message.send. Use base64 somente para arquivos pequenos. Para arquivos maiores use url: o servidor baixa um https público (imagem 5 MB, áudio/vídeo 16 MB, documento 100 MB). Para arquivo local do agente, use o endpoint multipart POST /instance/{instance}/media com Authorization: Bearer <mcp_token> e curl -F "file=@arquivo.pdf".',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'type' => ['type' => 'string'],
-                        'base64' => ['type' => 'string'],
-                        'filename' => ['type' => 'string'],
+                        'type' => ['type' => 'string', 'enum' => ['image', 'audio', 'video', 'document']],
+                        'url' => ['type' => 'string', 'description' => 'URL https pública do arquivo (alternativa a base64)'],
+                        'base64' => ['type' => 'string', 'description' => 'Conteúdo em base64 (alternativa a url; só arquivos pequenos)'],
+                        'filename' => ['type' => 'string', 'description' => 'Nome do arquivo (obrigatório com base64; com url é derivado da URL)'],
                         'mimeType' => ['type' => 'string'],
                         'messageId' => ['type' => 'string'],
                     ],
-                    'required' => ['type', 'base64', 'filename'],
+                    'required' => ['type'],
+                    'anyOf' => [
+                        ['required' => ['base64']],
+                        ['required' => ['url']],
+                    ],
                 ],
             ],
         ];
@@ -329,11 +334,12 @@ final class ToolRegistry
             ],
             'media.download' => ['messageId' => ['required', 'uuid']],
             'media.upload' => [
-                'type' => ['required', 'string'],
-                'base64' => ['required', 'string'],
-                'filename' => ['required', 'string'],
-                'mimeType' => ['sometimes', 'string'],
-                'messageId' => ['sometimes', 'uuid'],
+                'type' => ['required', 'string', 'in:image,audio,video,document'],
+                'url' => ['sometimes', 'nullable', 'string', 'url:https', 'required_without:base64'],
+                'base64' => ['sometimes', 'nullable', 'string', 'required_without:url'],
+                'filename' => ['sometimes', 'nullable', 'string', 'max:255', 'required_without:url'],
+                'mimeType' => ['sometimes', 'nullable', 'string', 'max:255'],
+                'messageId' => ['sometimes', 'nullable', 'uuid'],
             ],
             default => throw new InvalidArgumentException("Unknown tool: {$name}"),
         };
@@ -350,13 +356,27 @@ final class ToolRegistry
                 'name.required' => 'Nome inválido: informe um nome não vazio.',
                 'name.string' => 'Nome inválido: informe um nome não vazio.',
             ],
+            'media.upload' => [
+                'type.in' => 'Tipo de mídia inválido: use image, audio, video ou document.',
+                'base64.required_without' => 'Informe url ou base64 para a mídia.',
+                'url.required_without' => 'Informe url ou base64 para a mídia.',
+                'url.url' => 'URL inválida: informe uma URL https válida.',
+                'filename.required_without' => 'Informe o nome do arquivo.',
+                'messageId.uuid' => 'messageId inválido.',
+            ],
             default => [],
         };
 
         try {
-            return Validator::make($arguments, $rules, $messages)->validate();
+            $validated = Validator::make($arguments, $rules, $messages)->validate();
         } catch (ValidationException $e) {
             throw new InvalidArgumentException($e->validator->errors()->first());
         }
+
+        if ($name === 'media.upload' && ! empty($validated['url']) && ! empty($validated['base64'])) {
+            throw new InvalidArgumentException('Informe apenas url ou base64 para a mídia, nunca os dois.');
+        }
+
+        return $validated;
     }
 }

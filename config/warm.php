@@ -43,6 +43,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Media upload limits
+    |--------------------------------------------------------------------------
+    |
+    | Aligned with the WhatsApp limits per media type. `max_request_bytes` is
+    | the application-level cap for the multipart endpoint: the largest file
+    | (document, 100 MB) plus multipart overhead. Keep the runtime values in
+    | deployment/runtime (nginx client_max_body_size, PHP post_max_size and
+    | upload_max_filesize) above this value.
+    |
+    */
+
+    'media' => [
+        'max_bytes' => [
+            'image' => 5 * 1024 * 1024,
+            'audio' => 16 * 1024 * 1024,
+            'video' => 16 * 1024 * 1024,
+            'document' => 100 * 1024 * 1024,
+        ],
+        'max_request_bytes' => 105 * 1024 * 1024,
+        'download' => [
+            'connect_timeout' => 10,
+            'timeout' => 120,
+            'max_redirects' => 3,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Media content processing (PDF / audio / image)
     |--------------------------------------------------------------------------
     */

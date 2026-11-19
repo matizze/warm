@@ -1,5 +1,53 @@
 # Decisions
 
+## Upload de mídia sem base64 no tool call (URL e multipart)
+
+**Status:** decided / implemented (2026-11-19)
+
+**Context.** O `media.upload` só aceitava `base64` nos argumentos da tool call.
+Um modelo não escreve megabytes de base64 com confiança, então arquivos grandes
+(um PDF de 2,5 MB, por exemplo) travavam o agente. O contorno era um script
+próprio falando JSON-RPC direto no MCP, exigindo que cada agente soubesse montar
+o script e manusear o token.
+
+**Decision.**
+
+- `media.upload` aceita `url` **ou** `base64`, exatamente um dos dois. `filename`
+  continua obrigatório com `base64` e é derivado da URL/`Content-Disposition` no
+  caminho por `url`.
+- `url` só aceita `https`, porta 443, sem credenciais. O host é resolvido por DNS
+  e recusado se apontar para loopback, RFC1918, link-local (incluindo
+  `169.254.169.254`) ou IPv6 equivalente; a checagem roda de novo a cada redirect
+  (máximo 3). Download com timeouts de conexão/download e limite por tipo imposto
+  no `Content-Length` e durante o streaming.
+- `POST /instance/{instance}/media` (e a legada `POST /media` para a instância
+  default) recebe multipart `file`, com o mesmo Bearer do MCP
+  (`instance.resolve` + `mcp.auth`), e reusa `UploadMedia`. Sem token → 401.
+- Os três caminhos compartilham a mesma validação: limite por tipo (imagem 5 MB,
+  áudio/vídeo 16 MB, documento 100 MB), `mimeType` detectado pelo conteúdo e
+  coerência entre `type`, mime declarado e mime real. O corpo da requisição tem
+  um teto próprio de 105 MB em `config/warm.php`.
+- O runtime sobe para `client_max_body_size 110m`, `upload_max_filesize 105M`,
+  `post_max_size 110M`, `memory_limit 512M`, `fastcgi_read_timeout 600` — folga
+  para um documento de 100 MB mais o overhead do multipart.
+
+**Consequences.**
+
+- `media.upload` por `url` faz uma requisição de saída; um destino público lento
+  consome até o timeout de 120 s do request que o chamou.
+- O upload continua síncrono, como o caminho `base64` já era. O limite de
+  100 MB é o do documento no WhatsApp; arquivos maiores são recusados cedo.
+- O token do endpoint multipart é o mesmo `mcp_token` da instância: quem o tem
+  já podia chamar o MCP, então não há nova credencial a proteger.
+- A checagem de SSRF resolve o DNS antes da requisição; o cliente HTTP resolve de
+  novo ao conectar. Fecha o caso comum (host que aponta para IP privado), mas
+  resta uma janela teórica de DNS rebinding — pinar o IP resolvido seria o passo
+  seguinte se isso for explorável no ambiente.
+- `type=document` aceita qualquer conteúdo (é o tipo catch-all do WhatsApp); a
+  checagem de mime continua valendo para imagem/áudio/vídeo.
+- Instruções de agentes e deploy/validação em produção ficam nas etapas
+  seguintes (MTZ-977/MTZ-978), não nesta decisão.
+
 ## Credenciais de instância só no banco
 
 **Status:** decided / implemented (2026-11-03)
