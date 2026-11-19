@@ -9,7 +9,14 @@
 ARG PHP_VERSION=8.4
 
 # Stage 1: Composer vendors
-FROM composer:latest AS vendor
+# Composer runs on the same PHP line as the runtime (${PHP_VERSION}), so
+# composer.lock is resolved against the platform the app actually runs on.
+# The composer image is pinned and only supplies the binary — never the PHP
+# interpreter — so a new PHP release there cannot break the build again.
+FROM php:${PHP_VERSION}-cli-alpine AS vendor
+COPY --from=composer:2.11.2@sha256:511d2a96fce74de098b54224d59146fb8b6a7735d4e301f16c87c062e511900d /usr/bin/composer /usr/bin/composer
+# Composer extracts dist archives with `unzip` (the CLI image has no zip ext).
+RUN apk add --no-cache unzip
 WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install \
